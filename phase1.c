@@ -4,21 +4,23 @@
 struct process {
     int PID;
     int priority;
-    char[MAXNAME+1] name;
+    char name[MAXNAME + 1];
 };
 
-struct process[MAXPROC] processes;
+int j = 0;
+
+struct process process_table[MAXPROC];
     
 int main() {
     return 1;
 }
 
 void phase1_init(void) {
-    processes[0]->PID = 1;
-    processes[0]->priority = 6;
-    processes[0]->name = "init";
-
-    spork("testcase_main", (*testcase_main), NULL, sizeof(process), 3);
+    process_table[0].PID = 1;
+    process_table[0].priority = 6;
+    strcpy(process_table[0].name, "init");
+    
+    spork("testcase_main", (*testcase_main), NULL, sizeof(process_table), 3);
 
     int curProcess = 1;
     int status;
@@ -37,6 +39,10 @@ void phase1_init(void) {
 
 
 int spork(char *name, int (*startFunc)(void), void *arg, int stackSize, int priority) {
+    int slot = getpid() % MAXPROC;
+    process_table[slot].PID = 1;
+    process_table[slot].priority = priority;
+    strcpy(process_table[0].name, name);
     // creates new processs as a child of the current process, assigns it a pid, and stores it in the process table
     // return error if the table is full
     return 1;
