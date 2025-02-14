@@ -204,18 +204,10 @@ int join(int *status) {
     if (status == NULL) {
         return -3;
     }
-    for (int i = 0; i < MAXPROC; i++) {
-        USLOSS_Console("%d\t%d\n", process_table[i].PID, process_table[i].parentPid);
-        // if child exists, return PID of the 2child
-        if (process_table[i].parentPid == currentProcess->PID && process_table[i].quit == 1) {
-            *status = process_table[i].quitStatus;
-            process_table[i].in_use = 0;
-            free(process_table[i].stack);
-            return process_table[i].PID;
-        }
+    // make sure process has children
+    if (currentProcess -> first_child == NULL) {
+        return -2;
     }
-    // return -2 if the process does not have any children
-    return -2;
 
     // waits for child (works like wait in Unix)
     // process pauses until one of its children quits
@@ -233,12 +225,11 @@ void quit_phase_1a(int status, int switchToPid) {
     currentProcess->quit = 1;
     currentProcess->quitStatus = status;
 
+    free(currentProcess->stack);
+    currentProcess->in_use = 0;
     // Switch to the next process:
     TEMP_switchTo(switchToPid);
     
-    // if error Usloss halt (works like exit in UNIX)
-    // ends the currrent process but keeps its entry in the process table until the parent calls join
-    // if parent waiting, wakes up
     assert(0);
 }
 
