@@ -28,8 +28,7 @@ struct process {
     struct process *next_process;
 
     // commented out to get rid of errors for now; this is necessary code
-
-    // USLOSS_Context context;
+    USLOSS_Context state;
 };
 
 int currentPid = 1;
@@ -63,18 +62,26 @@ void phase1_init(void) {
         process_table[i].startFunc = NULL;
         process_table[i].status = 0;
     }
+    // create init process
+    struct process *initProcess = &process_table[0];
+    initProcess -> PID = 1;
+    initProcess -> priority = 6;
+    initProcess -> stackSize = USLOSS_MIN_STACK;
+    strcpy(initProcess -> name, "init");
+    initProcess->in_use = 1;
+    currentProcess = initProcess;
+    currentPid = initProcess -> PID;
 
     currentPid++;
-    
-    result = spork("testcase_main", (*testcase_main), NULL, sizeof(process_table), 3);
+
+    // start testcase_main, should have priority of 3
+    result = spork("testcase_main", (*testcase_main), NULL, USLOSS_MIN_STACK, 3);
     if (result < 0) {
         // print errors here then halt
         USLOSS_Halt(1);
     }
-    // context swtich to init process
-    TEMP_switchTo(result);
 
-    int curProcess = 1;
+    // clean up with join
     int status;
     while (1) {
         if (join(&status) == -2) {
@@ -83,7 +90,6 @@ void phase1_init(void) {
             USLOSS_Halt(1);
             return; // unsure if this is how to quit
         }
-        curProcess = (curProcess+1)%MAXPROC;
     }
 // should create testcase_main
 // set up process table
@@ -106,14 +112,21 @@ int spork(char *name, int (*startFunc)(void *), void *arg, int stackSize, int pr
     if (name == NULL || startFunc == NULL || priority < 1 || priority > 5 || strlen(name) >= MAXNAME) {
         return -1;
     }
-    // if no empty slots in the process table return -1; -> This part may be incorrect. May need to change how we do our struct/queue
-    int slot = getpid() % MAXPROC;
-    if (process_table[slot].in_use) {
+    // find an empty slot
+    int slot = -1;
+    for (int i = 0; i < MAXPROC; i++) {
+        if (process_table[slot].in_use) {
+            slot = i;
+            break;
+        }
+    }
+    if (slot == -1) {
+        // no slots available
         return -1;
     }
 
-    // fill the table and assign it as a child of the previous process -> This part is probably incorrect, may need to change how we do our struct/queue
-    strcpy(process_table[0].name, name);
+    // fill the table and assign it as a child of the previous process
+    strcpy(process_table[slot].name, name);
     process_table[slot].startFunc = startFunc;
     process_table[slot].PID = currentPid;
     process_table[slot].priority = priority;
@@ -134,11 +147,21 @@ int spork(char *name, int (*startFunc)(void *), void *arg, int stackSize, int pr
     }
 
     currentPid++;
-    
-    // USLOSS_ContextInit(USLOSS_Context *context, void *stack, int stackSize, USLOSS_PTE *pageTable, void(*func)(void)) -> syntax for context init
+    // Initialize context for process -> May need to write a wrapper for startFunc and arg
+    USLOSS_ContextInit(&(process_table[slot].state), process_table[slot].stack, process_table[slot].stackSize, NULL, startFunc);
 
-    // set parents and ensure there is space for children (code here) 
-
+    // set parents and ensure there is space for children 
+    process_table[slot].parentPid = currentProcess -> PID;
+    if (currentProcess -> first_child == NULL) {
+        currentProcess -> first_child = &process_table[slot];
+    } else {
+        // search for empty sibling if children already exist
+        struct process *child = currentProcess->first_child;
+        while (child -> next_sibling != NULL) {
+            child = child -> next_sibling;
+        }
+        child -> next_sibling = &process_table[slot];
+    }
     // return PID of the child process
     return process_table[slot].PID;
 }
@@ -173,9 +196,9 @@ void quit_phase_1a(int status, int switchToPid) {
     // Switch to the next process:
     TEMP_switchTo(switchToPid);
     
-// if error Usloss halt (works like exit in UNIX)
-// ends the currrent process but keeps its entry in the process table until the parent calls join
-// if parent waiting, wakes up
+    // if error Usloss halt (works like exit in UNIX)
+    // ends the currrent process but keeps its entry in the process table until the parent calls join
+    // if parent waiting, wakes up
     return;
 }
 
@@ -202,11 +225,11 @@ void dumpProcesses(void) {
 
 void TEMP_switchTo(int newpid) {
     // USLOSS_ContextSwitch
-    int oldPID = currentPid;
-    currentPid = newpid;
+    int oldPID = currentProcess -> PID;
+    currentProcess -> &process_table[newpid];
 
     // USLOSS_ContextSwitch(USLOSS_Context *old_context, USLOSS_Context *new_context) -> syntax for context swtiching in case we need it later
-    // USLOSS_ContextSwitch(process_table[oldPID].context, process_table[newpid].context); -> code for context switching, commented out for now
+    USLOSS_ContextSwitch(process_table[oldPID].state, process_table[newpid].state);
 }
 
 //void zap(int pid)
