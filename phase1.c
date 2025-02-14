@@ -44,6 +44,10 @@ void wrapper(void) {
     func(arg);
 }
 
+int testcaseWrapper(void *) {
+    return testcase_main();
+}
+
 void phase1_init(void) {
     // result of spork operation
     int result;
@@ -80,7 +84,7 @@ void phase1_init(void) {
     currentPid = initProcess -> PID;
     
     currentPid++;
-    USLOSS_Console("%lu\n", (unsigned long) currentProcess->startFunc);
+    //USLOSS_Console("%lu\n", (unsigned long) currentProcess->startFunc);
     // ERROR HERE: USLOSS_ContextInit(&(process_table[0].state), process_table[0].stack, process_table[0].stackSize, NULL, *wrapper);
 
     phase2_start_service_processes();
@@ -89,15 +93,17 @@ void phase1_init(void) {
     phase5_start_service_processes();
 
     // start testcase_main, should have priority of 3
-    result = spork("testcase_main", (*testcase_main), NULL, USLOSS_MIN_STACK, 3);
+    
+    result = spork("testcase_main", (*testcaseWrapper), NULL, USLOSS_MIN_STACK, 3);
     if (result < 0) {
         // print errors here then halt
         USLOSS_Halt(1);
     }
-
-    USLOSS_ContextInit(&(process_table[1].state), process_table[1].stack, process_table[1].stackSize, NULL, *wrapper);
-    USLOSS_Console("%luee\n", (unsigned long) currentProcess->startFunc);
-    USLOSS_ContextSwitch(&(process_table[0].state), &(process_table[1].state));
+//USLOSS_Console("%luppp\n", (unsigned long) currentProcess->startFunc);
+    //USLOSS_ContextInit(&(process_table[1].state), process_table[1].stack, process_table[1].stackSize, NULL, *wrapper);
+    //USLOSS_ContextSwitch(&(process_table[0].state), &(process_table[1].state));
+    //TEMP_switchTo(process_table[1].PID);
+    
     // clean up with join
     int status;
     while (1) {
@@ -250,7 +256,9 @@ void TEMP_switchTo(int newpid) {
     currentProcess = &process_table[newpid];
 
     // USLOSS_ContextSwitch(USLOSS_Context *old_context, USLOSS_Context *new_context) -> syntax for context swtiching in case we need it later
+    //USLOSS_Console("%lupeepp\n", (unsigned long) process_table[oldPID].state);
     USLOSS_ContextSwitch(&(process_table[oldPID].state), &(process_table[newpid].state));
+    USLOSS_Console("%lupeepp2\n", (unsigned long) currentProcess->startFunc);
 }
 
 //void zap(int pid)
