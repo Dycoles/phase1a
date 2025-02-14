@@ -4,6 +4,8 @@
 #include <assert.h>
 #include <stdlib.h>
 
+// TODO run queues?
+
 struct process {
     int PID;
     int priority;
@@ -35,6 +37,12 @@ int currentPid = 1;
 struct process process_table[MAXPROC];
 // current process (set to NULL)
 struct process *currentProcess = NULL;
+
+void wrapper(void) {
+    int (*func)(void *) = currentProcess->startFunc;
+    void *arg = currentProcess->arg;
+    func(arg);
+}
 
 void phase1_init(void) {
     // result of spork operation
@@ -72,8 +80,8 @@ void phase1_init(void) {
     currentPid = initProcess -> PID;
     
     currentPid++;
-
-    USLOSS_ContextInit(&(process_table[0].state), process_table[0].stack, process_table[0].stackSize, NULL, NULL);
+    USLOSS_Console("%lu\n", (unsigned long) currentProcess->startFunc);
+    // ERROR HERE: USLOSS_ContextInit(&(process_table[0].state), process_table[0].stack, process_table[0].stackSize, NULL, *wrapper);
 
     phase2_start_service_processes();
     phase3_start_service_processes();
@@ -87,9 +95,9 @@ void phase1_init(void) {
         USLOSS_Halt(1);
     }
 
-    USLOSS_ContextInit(&(process_table[1].state), process_table[1].stack, process_table[1].stackSize, NULL, process_table[1].startFunc);
+    USLOSS_ContextInit(&(process_table[1].state), process_table[1].stack, process_table[1].stackSize, NULL, *wrapper);
+    USLOSS_Console("%luee\n", (unsigned long) currentProcess->startFunc);
     USLOSS_ContextSwitch(&(process_table[0].state), &(process_table[1].state));
-
     // clean up with join
     int status;
     while (1) {
@@ -156,7 +164,7 @@ int spork(char *name, int (*startFunc)(void *), void *arg, int stackSize, int pr
     }
     currentPid++;
     // Initialize context for process -> May need to write a wrapper for startFunc and arg
-    USLOSS_ContextInit(&(process_table[slot].state), process_table[slot].stack, process_table[slot].stackSize, NULL, startFunc);
+    USLOSS_ContextInit(&(process_table[slot].state), process_table[slot].stack, process_table[slot].stackSize, NULL, *wrapper);
 
     // set parents and ensure there is space for children 
     process_table[slot].parentPid = currentProcess -> PID;
