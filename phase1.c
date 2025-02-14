@@ -1,9 +1,10 @@
 #include <stdio.h>
-#include <phase1.h>
+#include "phase1.h"
 #include <string.h>
-#include <usloss.h>
+#include <stdlib.h>
+#include "usloss.h"
 // temp variables to prevent errors
-USLOSS_MIN_STACK = 50;
+//USLOSS_MIN_STACK = 50;
 
 struct process {
     int PID;
@@ -62,7 +63,7 @@ void phase1_init(void) {
         if (join(&status) == -2) {
             // print out an error message here
             // call USLOSS_halt
-            USLOSS_halt(1);
+            USLOSS_Halt(1);
             return; // unsure if this is how to quit
         }
         curProcess = (curProcess+1)%MAXPROC;
@@ -75,7 +76,7 @@ void phase1_init(void) {
 }
 
 
-int spork(char *name, int (*startFunc)(void), void *arg, int stackSize, int priority) {
+int spork(char *name, int (*startFunc)(void *), void *arg, int stackSize, int priority) {
     // check to ensure we are running in kernel mode (Talked about it in class for testcase 8)
     if (USLOSS_PsrGet() == 0) {
         USLOSS_Halt(1);
@@ -162,10 +163,10 @@ void dumpProcesses(void) {
     // prints debug info about process table -> should be easiest function, just need to access USLOSS console and print info
     int x;
     for (int i = 0; i < MAXPROC; i++) {
-        printf("Name: %s", process_table[i].name, "\n");
-        printf("PID: %d", process_table[i].PID, "\n");
-        printf("Parent PID: %d", process_table[i].parentPid, "\n");
-        printf("Priority: %d", process_table[i].priority, "\n");
+        printf("Name: %s\n", process_table[i].name);
+        printf("PID: %d\n", process_table[i].PID);
+        printf("Parent PID: %d\n", process_table[i].parentPid);
+        printf("Priority: %d\n", process_table[i].priority);
         if (process_table[i].status == 0) {
             printf("Running! \n");
         } else {
