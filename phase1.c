@@ -1,9 +1,8 @@
 #include <stdio.h>
 #include "phase1.h"
 #include <string.h>
+#include <assert.h>
 #include <stdlib.h>
-#include "usloss.h"
-// temp variables to prevent errors
 
 struct process {
     int PID;
@@ -71,8 +70,15 @@ void phase1_init(void) {
     initProcess->in_use = 1;
     currentProcess = initProcess;
     currentPid = initProcess -> PID;
-
+    
     currentPid++;
+
+    USLOSS_ContextInit(&(process_table[0].state), process_table[0].stack, process_table[0].stackSize, NULL, NULL);
+
+    phase2_start_service_processes();
+    phase3_start_service_processes();
+    phase4_start_service_processes();
+    phase5_start_service_processes();
 
     // start testcase_main, should have priority of 3
     result = spork("testcase_main", (*testcase_main), NULL, USLOSS_MIN_STACK, 3);
@@ -80,6 +86,9 @@ void phase1_init(void) {
         // print errors here then halt
         USLOSS_Halt(1);
     }
+
+    USLOSS_ContextInit(&(process_table[1].state), process_table[1].stack, process_table[1].stackSize, NULL, process_table[1].startFunc);
+    USLOSS_ContextSwitch(&(process_table[0].state), &(process_table[1].state));
 
     // clean up with join
     int status;
@@ -115,7 +124,7 @@ int spork(char *name, int (*startFunc)(void *), void *arg, int stackSize, int pr
     // find an empty slot
     int slot = -1;
     for (int i = 0; i < MAXPROC; i++) {
-        if (process_table[slot].in_use) {
+        if (!(process_table[i].in_use)) {
             slot = i;
             break;
         }
@@ -145,7 +154,6 @@ int spork(char *name, int (*startFunc)(void *), void *arg, int stackSize, int pr
     if (process_table[slot].stack == NULL) {
         return -2;
     }
-
     currentPid++;
     // Initialize context for process -> May need to write a wrapper for startFunc and arg
     USLOSS_ContextInit(&(process_table[slot].state), process_table[slot].stack, process_table[slot].stackSize, NULL, startFunc);
@@ -173,7 +181,7 @@ int join(int *status) {
     }
     for (int i = 0; i < MAXPROC; i++) {
         // if child exists, return PID of the child
-        if (process_table[i].parentPid == currentPid && process_table[i].quit == 1) {
+        if (process_table[i].parentPid == currentProcess->PID && process_table[i].quit == 1) {
             *status = process_table[i].quitStatus;
             process_table[i].in_use = 0;
             free(process_table[i].stack);
@@ -189,6 +197,12 @@ int join(int *status) {
 }
 
 void quit_phase_1a(int status, int switchToPid) {
+    // If not all children are joined, give error:
+    if (currentProcess->first_child != NULL) {
+        USLOSS_Console("Error: Process quit before joining with all children.");
+        USLOSS_Halt(1);
+    }
+
     // Halt the current process:
     currentProcess->quit = 1;
     currentProcess->quitStatus = status;
@@ -199,7 +213,7 @@ void quit_phase_1a(int status, int switchToPid) {
     // if error Usloss halt (works like exit in UNIX)
     // ends the currrent process but keeps its entry in the process table until the parent calls join
     // if parent waiting, wakes up
-    return;
+    assert(0);
 }
 
 int getpid(void) {
@@ -209,7 +223,6 @@ int getpid(void) {
 
 void dumpProcesses(void) {
     // prints debug info about process table -> should be easiest function, just need to access USLOSS console and print info
-    int x;
     for (int i = 0; i < MAXPROC; i++) {
         printf("Name: %s\n", process_table[i].name);
         printf("PID: %d\n", process_table[i].PID);
@@ -226,10 +239,10 @@ void dumpProcesses(void) {
 void TEMP_switchTo(int newpid) {
     // USLOSS_ContextSwitch
     int oldPID = currentProcess -> PID;
-    currentProcess -> &process_table[newpid];
+    currentProcess = &process_table[newpid];
 
     // USLOSS_ContextSwitch(USLOSS_Context *old_context, USLOSS_Context *new_context) -> syntax for context swtiching in case we need it later
-    USLOSS_ContextSwitch(process_table[oldPID].state, process_table[newpid].state);
+    USLOSS_ContextSwitch(&(process_table[oldPID].state), &(process_table[newpid].state));
 }
 
 //void zap(int pid)
