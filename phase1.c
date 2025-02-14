@@ -166,6 +166,13 @@ int join(int *status) {
 }
 
 void quit_phase_1a(int status, int switchToPid) {
+    // Halt the current process:
+    currentProcess->quit = 1;
+    currentProcess->quitStatus = status;
+
+    // Switch to the next process:
+    TEMP_switchTo(switchToPid);
+    
 // if error Usloss halt (works like exit in UNIX)
 // ends the currrent process but keeps its entry in the process table until the parent calls join
 // if parent waiting, wakes up
