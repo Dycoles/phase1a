@@ -4,7 +4,6 @@
 #include <stdlib.h>
 #include "usloss.h"
 // temp variables to prevent errors
-//USLOSS_MIN_STACK = 50;
 
 struct process {
     int PID;
@@ -34,18 +33,36 @@ struct process {
 };
 
 int currentPid = 1;
+// process table
 struct process process_table[MAXPROC];
+// current process (set to NULL)
+struct process *currentProcess = NULL;
 
 void phase1_init(void) {
     // result of spork operation
     int result;
     // initialize all processes in process table
-    memset(process_table, 0, sizeof(process_table));
+    for (int i = 0; i < MAXPROC; i++) {
+        memset(process_table[i].name, 0, MAXNAME);
 
-    process_table[0].PID = currentPid;
-    process_table[0].priority = 6;
-    process_table[0].in_use = 1;
-    strcpy(process_table[0].name, "init");
+        process_table[i].next_process = NULL;
+        process_table[i].first_child = NULL;
+        process_table[i].next_sibling = NULL;
+        process_table[i].parent = NULL;
+
+        process_table[i].PID = -1;
+        process_table[i].arg = NULL;
+        process_table[i].in_use = 0;
+        process_table[i].parentPid = -1;
+        process_table[i].priority = -1;
+
+        process_table[i].quit = 0;
+        process_table[i].quitStatus = 0;
+        process_table[i].stack = NULL;
+        process_table[i].stackSize = 0;
+        process_table[i].startFunc = NULL;
+        process_table[i].status = 0;
+    }
 
     currentPid++;
     
@@ -152,6 +169,7 @@ void quit_phase_1a(int status, int switchToPid) {
 // if error Usloss halt (works like exit in UNIX)
 // ends the currrent process but keeps its entry in the process table until the parent calls join
 // if parent waiting, wakes up
+    return;
 }
 
 int getpid(void) {
