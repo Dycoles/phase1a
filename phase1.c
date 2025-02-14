@@ -39,6 +39,7 @@ struct process process_table[MAXPROC];
 struct process *currentProcess = NULL;
 
 void wrapper(void) {
+    USLOSS_Console("In Wrapper\n");
     int (*func)(void *) = currentProcess->startFunc;
     void *arg = currentProcess->arg;
     func(arg);
@@ -84,9 +85,9 @@ void phase1_init(void) {
     currentProcess = initProcess;
     currentPid = initProcess -> PID;
     USLOSS_ContextInit(&(initProcess->state), initProcess->stack, initProcess->stackSize, NULL, *wrapper);
-
     currentPid++;
-    USLOSS_Console("%lu\n", (unsigned long) currentProcess->startFunc);
+    //USLOSS_Console("%lu\n", (unsigned long) currentProcess->startFunc);
+    // ERROR HERE: USLOSS_ContextInit(&(process_table[0].state), process_table[0].stack, process_table[0].stackSize, NULL, *wrapper);
 
     phase2_start_service_processes();
     phase3_start_service_processes();
@@ -94,13 +95,18 @@ void phase1_init(void) {
     phase5_start_service_processes();
 
     // start testcase_main, should have priority of 3
+    
     result = spork("testcase_main", (*testcaseWrapper), NULL, USLOSS_MIN_STACK, 3);
     if (result < 0) {
         // print errors here then halt
         USLOSS_Halt(1);
     }
-
-    USLOSS_Console("%luee\n", (unsigned long) currentProcess->startFunc);
+//USLOSS_Console("%luppp\n", (unsigned long) currentProcess->startFunc);
+    USLOSS_ContextInit(&(process_table[1].state), process_table[1].stack, process_table[1].stackSize, NULL, *wrapper);
+    //USLOSS_Console("After Init Init\n");
+    //USLOSS_ContextSwitch(&(process_table[0].state), &(process_table[1].state));
+    TEMP_switchTo(process_table[0].PID);
+    
     // clean up with join
     int status;
     while (1) {
@@ -168,6 +174,8 @@ int spork(char *name, int (*startFunc)(void *), void *arg, int stackSize, int pr
     currentPid++;
     // Initialize context for process -> May need to write a wrapper for startFunc and arg
     USLOSS_ContextInit(&(process_table[slot].state), process_table[slot].stack, process_table[slot].stackSize, NULL, *wrapper);
+    TEMP_switchTo(slot);
+    USLOSS_Console("AFter Switch in Spork\n");
 
     // set parents and ensure there is space for children 
     process_table[slot].parentPid = currentProcess -> PID;
@@ -181,16 +189,19 @@ int spork(char *name, int (*startFunc)(void *), void *arg, int stackSize, int pr
         }
         child -> next_sibling = &process_table[slot];
     }
+    //testcaseWrapper((void *)1);
     // return PID of the child process
     return process_table[slot].PID;
 }
 
 int join(int *status) {
+    //USLOSS_Console("Join Once\n");
     // if argument is invalid, return -3
     if (status == NULL) {
         return -3;
     }
     for (int i = 0; i < MAXPROC; i++) {
+        //USLOSS_Console("%d\n", process_table[i].quit);
         // if child exists, return PID of the child
         if (process_table[i].parentPid == currentProcess->PID && process_table[i].quit == 1) {
             *status = process_table[i].quitStatus;
@@ -253,7 +264,9 @@ void TEMP_switchTo(int newpid) {
     currentProcess = &process_table[newpid];
 
     // USLOSS_ContextSwitch(USLOSS_Context *old_context, USLOSS_Context *new_context) -> syntax for context swtiching in case we need it later
+    //USLOSS_Console("%lupeepp\n", (unsigned long) &process_table[oldPID].state);
     USLOSS_ContextSwitch(&(process_table[oldPID].state), &(process_table[newpid].state));
+    //USLOSS_Console("%lupeepp\n", (unsigned long) &process_table[newpid].state);
 }
 
 //void zap(int pid)
