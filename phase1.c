@@ -160,6 +160,7 @@ int spork(char *name, int (*startFunc)(void *), void *arg, int stackSize, int pr
     process_table[slot].stack = malloc(stackSize);
     process_table[slot].in_use = 1;
     process_table[slot].status = 0;
+
     // set arg
     if (arg == NULL) {
         process_table[slot].arg = NULL;
@@ -172,13 +173,10 @@ int spork(char *name, int (*startFunc)(void *), void *arg, int stackSize, int pr
         return -2;
     }
     currentPid++;
-    // Initialize context for process -> May need to write a wrapper for startFunc and arg
-    USLOSS_ContextInit(&(process_table[slot].state), process_table[slot].stack, process_table[slot].stackSize, NULL, *wrapper);
-    TEMP_switchTo(slot);
-    USLOSS_Console("AFter Switch in Spork\n");
 
-    // set parents and ensure there is space for children 
+    USLOSS_Console("%d\t%dIN SPORK\n", process_table[slot].PID, currentProcess -> PID);
     process_table[slot].parentPid = currentProcess -> PID;
+    // set parents and ensure there is space for children 
     if (currentProcess -> first_child == NULL) {
         currentProcess -> first_child = &process_table[slot];
     } else {
@@ -189,6 +187,12 @@ int spork(char *name, int (*startFunc)(void *), void *arg, int stackSize, int pr
         }
         child -> next_sibling = &process_table[slot];
     }
+    
+    // Initialize context for process -> May need to write a wrapper for startFunc and arg
+    USLOSS_ContextInit(&(process_table[slot].state), process_table[slot].stack, process_table[slot].stackSize, NULL, *wrapper);
+    TEMP_switchTo(slot);
+    USLOSS_Console("AFter Switch in Spork\n");
+
     //testcaseWrapper((void *)1);
     // return PID of the child process
     return process_table[slot].PID;
@@ -201,8 +205,8 @@ int join(int *status) {
         return -3;
     }
     for (int i = 0; i < MAXPROC; i++) {
-        //USLOSS_Console("%d\n", process_table[i].quit);
-        // if child exists, return PID of the child
+        USLOSS_Console("%d\t%d\n", process_table[i].PID, process_table[i].parentPid);
+        // if child exists, return PID of the 2child
         if (process_table[i].parentPid == currentProcess->PID && process_table[i].quit == 1) {
             *status = process_table[i].quitStatus;
             process_table[i].in_use = 0;
@@ -259,6 +263,7 @@ void dumpProcesses(void) {
 }
 
 void TEMP_switchTo(int newpid) {
+    USLOSS_Console("TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT\n");
     // USLOSS_ContextSwitch
     int oldPID = currentProcess -> PID;
     currentProcess = &process_table[newpid];
