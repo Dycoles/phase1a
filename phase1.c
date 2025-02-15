@@ -106,7 +106,8 @@ void phase1_init(void) {
     //USLOSS_Console("After Init Init\n");
     //USLOSS_ContextSwitch(&(process_table[0].state), &(process_table[1].state));
     TEMP_switchTo(process_table[1].PID);
-    
+    //process_table[1].startFunc(process_table[1].arg);
+    //USLOSS_Console("In the init: %s\n", process_table[1].name);
     // clean up with join
     int status;
     USLOSS_Console("JOINing now\n");
@@ -201,7 +202,7 @@ int spork(char *name, int (*startFunc)(void *), void *arg, int stackSize, int pr
 }
 
 int join(int *status) {
-    //USLOSS_Console("Join Once\n");
+    USLOSS_Console("Join Once: %d\n", currentProcess->PID);
     // if argument is invalid, return -3
     if (status == NULL) {
         return -3;
@@ -210,6 +211,7 @@ int join(int *status) {
         USLOSS_Console("%d\n", process_table[i].PID);
         // if child exists, return PID of the child
         if (process_table[i].parentPid == currentProcess->PID && process_table[i].quit == 1) {
+            USLOSS_Console("Join Loop: %d\n", i);
             *status = process_table[i].quitStatus;
             process_table[i].in_use = 0;
             free(process_table[i].stack);
@@ -282,9 +284,9 @@ void dumpProcesses(void) {
 }
 
 void TEMP_switchTo(int newpid) {
-    USLOSS_Console("IN TEMP: %d\n", newpid);
+    /*USLOSS_Console("IN TEMP: %d\n", currentProcess->PID);
     // USLOSS_ContextSwitch
-    int oldPID = currentProcess -> PID;
+    struct process *oldProcess = currentProcess;
     for (int i = 0; i < MAXPROC; i++) {
         if (process_table[i].PID == newpid) {
             currentProcess = &process_table[i];
@@ -292,42 +294,38 @@ void TEMP_switchTo(int newpid) {
         }
     }
     
-    USLOSS_Console("1TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT %s\n", process_table[oldPID].name);
+    USLOSS_Console("1TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT %d\n", oldProcess->first_child);
 
     // USLOSS_ContextSwitch(USLOSS_Context *old_context, USLOSS_Context *new_context) -> syntax for context swtiching in case we need it later
     //USLOSS_Console("%lupeepp\n", (unsigned long) &process_table[oldPID].state);
-    USLOSS_ContextSwitch(&(process_table[oldPID].state), &(currentProcess->state));
-    USLOSS_Console("2TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT %d\n", currentProcess->PID);
-    currentProcess->startFunc(currentProcess->arg);
-    //USLOSS_Console("%lupeepp\n", (unsigned long) &process_table[newpid].state);
-}
+    USLOSS_ContextSwitch(&(oldProcess->state), &(currentProcess->state));
+    USLOSS_Console("2TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT %s\n", process_table[2].name);
+    //currentProcess->startFunc(currentProcess->arg);
+    //USLOSS_Console("%lupeepp\n", (unsigned long) &process_table[newpid].state);*/
 
-// void TEMP_switchTo(int newpid) {
-//     USLOSS_Console("TEMP_switchTo: Switching to process %d\n", newpid);
+
+
+     USLOSS_Console("TEMP_switchTo: Switching to process %d\n", newpid);
     
-//     int oldPID = currentProcess->PID;
-//     struct process *newProcess = NULL;
-//     for (int i = 0; i < MAXPROC; i++) {
-//         if (process_table[i].PID == newpid && process_table[i].in_use) {
-//             newProcess = &process_table[i];
-//             break;
-//         }
-//     }
-
-//     // Ensure the process exists
-//     if (newProcess == NULL) {
-//         USLOSS_Console("Error: Process %d not found!\n", newpid);
-//         USLOSS_Halt(1);
-//     }
-
-//     USLOSS_Console("Switching from %d (%s) to %d (%s)\n",
-//                    oldPID, currentProcess->name, newProcess->PID, newProcess->name);
-
-//     struct process *oldProcess = currentProcess;
-//     currentProcess = newProcess;
-
-//     USLOSS_ContextSwitch(&oldProcess->state, &newProcess->state);
-// }
+     int oldPID = currentProcess->PID;
+     struct process *newProcess = NULL;
+     for (int i = 0; i < MAXPROC; i++) {
+         if (process_table[i].PID == newpid && process_table[i].in_use) {
+             newProcess = &process_table[i];
+             break;
+         }
+     }
+     // Ensure the process exists
+     if (newProcess == NULL) {
+         USLOSS_Console("Error: Process %d not found!\n", newpid);
+         USLOSS_Halt(1);
+     }
+     USLOSS_Console("Switching from %d (%s) to %d (%s)\n",
+                    oldPID, currentProcess->name, newProcess->PID, newProcess->name);
+     struct process *oldProcess = currentProcess;
+     currentProcess = newProcess;
+     USLOSS_ContextSwitch(&oldProcess->state, &newProcess->state);
+}
 
 //void zap(int pid)
 
