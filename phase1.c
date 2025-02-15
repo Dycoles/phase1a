@@ -302,6 +302,33 @@ void TEMP_switchTo(int newpid) {
     //USLOSS_Console("%lupeepp\n", (unsigned long) &process_table[newpid].state);
 }
 
+// void TEMP_switchTo(int newpid) {
+//     USLOSS_Console("TEMP_switchTo: Switching to process %d\n", newpid);
+    
+//     int oldPID = currentProcess->PID;
+//     struct process *newProcess = NULL;
+//     for (int i = 0; i < MAXPROC; i++) {
+//         if (process_table[i].PID == newpid && process_table[i].in_use) {
+//             newProcess = &process_table[i];
+//             break;
+//         }
+//     }
+
+//     // Ensure the process exists
+//     if (newProcess == NULL) {
+//         USLOSS_Console("Error: Process %d not found!\n", newpid);
+//         USLOSS_Halt(1);
+//     }
+
+//     USLOSS_Console("Switching from %d (%s) to %d (%s)\n",
+//                    oldPID, currentProcess->name, newProcess->PID, newProcess->name);
+
+//     struct process *oldProcess = currentProcess;
+//     currentProcess = newProcess;
+
+//     USLOSS_ContextSwitch(&oldProcess->state, &newProcess->state);
+// }
+
 //void zap(int pid)
 
 //void blockMe()
