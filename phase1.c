@@ -105,10 +105,11 @@ void phase1_init(void) {
     USLOSS_ContextInit(&(process_table[1].state), process_table[1].stack, process_table[1].stackSize, NULL, *wrapper);
     //USLOSS_Console("After Init Init\n");
     //USLOSS_ContextSwitch(&(process_table[0].state), &(process_table[1].state));
-    TEMP_switchTo(process_table[0].PID);
+    TEMP_switchTo(process_table[1].PID);
     
     // clean up with join
     int status;
+    USLOSS_Console("JOINing now\n");
     while (1) {
         if (join(&status) == -2) {
             // print out an error message here
@@ -190,16 +191,42 @@ int spork(char *name, int (*startFunc)(void *), void *arg, int stackSize, int pr
     
     // Initialize context for process -> May need to write a wrapper for startFunc and arg
     USLOSS_ContextInit(&(process_table[slot].state), process_table[slot].stack, process_table[slot].stackSize, NULL, *wrapper);
-    TEMP_switchTo(slot);
+    //TEMP_switchTo(process_table[slot].PID);
     USLOSS_Console("AFter Switch in Spork\n");
 
     //testcaseWrapper((void *)1);
     // return PID of the child process
+    //USLOSS_Console()
     return process_table[slot].PID;
 }
 
 int join(int *status) {
     //USLOSS_Console("Join Once\n");
+    // if argument is invalid, return -3
+    if (status == NULL) {
+        return -3;
+    }
+    for (int i = 0; i < MAXPROC; i++) {
+        USLOSS_Console("%d\n", process_table[i].PID);
+        // if child exists, return PID of the child
+        if (process_table[i].parentPid == currentProcess->PID && process_table[i].quit == 1) {
+            *status = process_table[i].quitStatus;
+            process_table[i].in_use = 0;
+            free(process_table[i].stack);
+            return process_table[i].PID;
+        }
+    }
+    // return -2 if the process does not have any children
+    return -2;
+
+    // waits for child (works like wait in Unix)
+    // process pauses until one of its children quits
+    // receives child's exit status
+    
+    
+    
+    
+    /*//USLOSS_Console("Join Once\n");
     // if argument is invalid, return -3
     if (status == NULL) {
         return -3;
@@ -212,6 +239,7 @@ int join(int *status) {
     // waits for child (works like wait in Unix)
     // process pauses until one of its children quits
     // receives child's exit status
+    assert(0);*/
 }
 
 void quit_phase_1a(int status, int switchToPid) {
@@ -220,7 +248,7 @@ void quit_phase_1a(int status, int switchToPid) {
         USLOSS_Console("Error: Process quit before joining with all children.");
         USLOSS_Halt(1);
     }
-
+    USLOSS_Console("IN QUIT\n");
     // Halt the current process:
     currentProcess->quit = 1;
     currentProcess->quitStatus = status;
@@ -235,7 +263,7 @@ void quit_phase_1a(int status, int switchToPid) {
 
 int getpid(void) {
     // returns the PID of cur process
-    return currentPid;
+    return currentProcess->PID;
 }
 
 void dumpProcesses(void) {
@@ -254,18 +282,7 @@ void dumpProcesses(void) {
 }
 
 void TEMP_switchTo(int newpid) {
-    USLOSS_Console("TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT\n");
-    // USLOSS_ContextSwitch
-    int oldPID = currentProcess -> PID;
-    currentProcess = &process_table[newpid];
-
-    // USLOSS_ContextSwitch(USLOSS_Context *old_context, USLOSS_Context *new_context) -> syntax for context swtiching in case we need it later
-    //USLOSS_Console("%lupeepp\n", (unsigned long) &process_table[oldPID].state);
-    USLOSS_ContextSwitch(&(process_table[oldPID].state), &(process_table[newpid].state));
-    //USLOSS_Console("%lupeepp\n", (unsigned long) &process_table[newpid].state);
-
-
-    /*USLOSS_Console("IN TEMP: %d\n", newpid);
+    USLOSS_Console("IN TEMP: %d\n", newpid);
     // USLOSS_ContextSwitch
     int oldPID = currentProcess -> PID;
     for (int i = 0; i < MAXPROC; i++) {
@@ -275,13 +292,14 @@ void TEMP_switchTo(int newpid) {
         }
     }
     
-    USLOSS_Console("1TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT %s\n", currentProcess->name);
+    USLOSS_Console("1TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT %s\n", process_table[oldPID].name);
 
     // USLOSS_ContextSwitch(USLOSS_Context *old_context, USLOSS_Context *new_context) -> syntax for context swtiching in case we need it later
     //USLOSS_Console("%lupeepp\n", (unsigned long) &process_table[oldPID].state);
     USLOSS_ContextSwitch(&(process_table[oldPID].state), &(currentProcess->state));
     USLOSS_Console("2TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT %d\n", currentProcess->PID);
-    //USLOSS_Console("%lupeepp\n", (unsigned long) &process_table[newpid].state);*/
+    currentProcess->startFunc(currentProcess->arg);
+    //USLOSS_Console("%lupeepp\n", (unsigned long) &process_table[newpid].state);
 }
 
 //void zap(int pid)
