@@ -263,6 +263,25 @@ void TEMP_switchTo(int newpid) {
     //USLOSS_Console("%lupeepp\n", (unsigned long) &process_table[oldPID].state);
     USLOSS_ContextSwitch(&(process_table[oldPID].state), &(process_table[newpid].state));
     //USLOSS_Console("%lupeepp\n", (unsigned long) &process_table[newpid].state);
+
+
+    /*USLOSS_Console("IN TEMP: %d\n", newpid);
+    // USLOSS_ContextSwitch
+    int oldPID = currentProcess -> PID;
+    for (int i = 0; i < MAXPROC; i++) {
+        if (process_table[i].PID == newpid) {
+            currentProcess = &process_table[i];
+            break;
+        }
+    }
+    
+    USLOSS_Console("1TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT %s\n", currentProcess->name);
+
+    // USLOSS_ContextSwitch(USLOSS_Context *old_context, USLOSS_Context *new_context) -> syntax for context swtiching in case we need it later
+    //USLOSS_Console("%lupeepp\n", (unsigned long) &process_table[oldPID].state);
+    USLOSS_ContextSwitch(&(process_table[oldPID].state), &(currentProcess->state));
+    USLOSS_Console("2TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT %d\n", currentProcess->PID);
+    //USLOSS_Console("%lupeepp\n", (unsigned long) &process_table[newpid].state);*/
 }
 
 //void zap(int pid)
