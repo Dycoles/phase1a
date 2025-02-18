@@ -37,9 +37,12 @@ struct process process_table[MAXPROC];
 struct process *currentProcess = NULL;
 
 void wrapper(void) {
+    int result;
     int (*func)(void *) = currentProcess->startFunc;
     void *arg = currentProcess->arg;
-    func(arg);
+
+    result = func(arg);
+    quit_phase_1a(result, 1);
 }
 
 int testcaseWrapper(void *) {
@@ -85,7 +88,9 @@ void phase1_init(void) {
     initProcess->in_use = 1;
     currentProcess = initProcess;
     currentPid = initProcess -> PID;
-    USLOSS_ContextInit(&(initProcess->state), initProcess->stack, initProcess->stackSize, NULL, *wrapper);
+    USLOSS_ContextInit(&(initProcess->state), initProcess->stack, initProcess->stackSize, NULL, wrapper);
+    USLOSS_Console("Phase 1A TEMPORARY HACK: init() manually switching to PID 1.\n");
+    TEMP_switchTo(currentPid);
     currentPid++;;
 
     phase2_start_service_processes();
@@ -100,6 +105,7 @@ void phase1_init(void) {
         // print errors here then halt
         USLOSS_Halt(1);
     }
+    USLOSS_Console("Phase 1A TEMPORARY HACK: init() manually switching to testcase_main() after using spork() to create it.\n");
     TEMP_switchTo(result);
     // clean up with join
     int status;
@@ -167,7 +173,7 @@ int spork(char *name, int (*startFunc)(void *), void *arg, int stackSize, int pr
     }
     
     // Initialize context for process
-    USLOSS_ContextInit(&(process_table[slot].state), process_table[slot].stack, process_table[slot].stackSize, NULL, *wrapper);
+    USLOSS_ContextInit(&(process_table[slot].state), process_table[slot].stack, process_table[slot].stackSize, NULL, wrapper);
     // return PID of the child process
     return process_table[slot].PID;
 }
@@ -241,11 +247,6 @@ void TEMP_switchTo(int newpid) {
          USLOSS_Console("Error: Process %d not found!\n", newpid);
          USLOSS_Halt(1);
      }
-
-     if (currentProcess == newProcess) {
-        USLOSS_Console("Error: Attempting to switch to the currently running process %d\n", newpid);
-        USLOSS_Halt(1);
-    }
      
      struct process *oldProcess = currentProcess;
      currentProcess = newProcess;
