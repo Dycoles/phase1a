@@ -123,6 +123,7 @@ void phase1_init(void) {
 int spork(char *name, int (*startFunc)(void *), void *arg, int stackSize, int priority) {
     // check to ensure we are running in kernel mode (Talked about it in class for testcase 8)
     if (USLOSS_PsrGet() == 0) {
+        USLOSS_Console("ERROR: Someone attempted to call spork while in user mode!\n");
         USLOSS_Halt(1);
     }
     // if stack size smaller than USLOSS_MIN_STACK, return -2
