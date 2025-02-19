@@ -46,7 +46,7 @@ int disableInterrupts() {
 }
 
 void restoreInterrupts(int old_psr) {
-    USLOSS_PsrSet(old_psr);
+    int x = USLOSS_PsrSet(old_psr); x++;
 }
 
 void wrapper(void) {
@@ -105,7 +105,7 @@ void phase1_init(void) {
     currentProcess = initProcess;
     currentPid = initProcess -> PID;
     USLOSS_ContextInit(&(initProcess->state), initProcess->stack, initProcess->stackSize, NULL, wrapper);
-    // USLOSS_Console("Phase 1A TEMPORARY HACK: init() manually switching to PID 1.\n");
+    USLOSS_Console("Phase 1A TEMPORARY HACK: init() manually switching to PID 1.\n");
     TEMP_switchTo(currentPid);
     currentPid++;;
 
@@ -121,7 +121,7 @@ void phase1_init(void) {
         // print errors here then halt
         USLOSS_Halt(1);
     }
-    // USLOSS_Console("Phase 1A TEMPORARY HACK: init() manually switching to testcase_main() after using spork() to create it.\n");
+    USLOSS_Console("Phase 1A TEMPORARY HACK: init() manually switching to testcase_main() after using spork() to create it.\n");
     TEMP_switchTo(result);
     // clean up with join
     int status;
@@ -206,10 +206,10 @@ int join(int *status) {
     }
     for (int i = 0; i < MAXPROC; i++) {
         // if child exists, return PID of the child
-        if (process_table[i].parentPid == currentProcess->PID && process_table[i].quit == 1) {
+        if (process_table[i].parentPid == currentProcess->PID && process_table[i].quit == 1 && process_table[i].in_use == 1) {
             *status = process_table[i].quitStatus;
             process_table[i].in_use = 0;
-            free(process_table[i].stack);
+            //free(process_table[i].stack);
             restoreInterrupts(old_psr);
             return process_table[i].PID;
         }
@@ -220,30 +220,32 @@ int join(int *status) {
 }
 
 void quit_phase_1a(int status, int switchToPid) {
-    USLOSS_Console("quitting\n");
+    //USLOSS_Console("quitting\n");
     if ((USLOSS_PsrGet() & USLOSS_PSR_CURRENT_MODE) == 0 ) {
         USLOSS_Console("ERROR: Someone attempted to call spork while in user mode!\n");
         // USLOSS_Halt(1);
     }
     int old_psr = disableInterrupts();
-    USLOSS_Console("Interrupts disabled quit\n");
+    //USLOSS_Console("Interrupts disabled quit\n");
     // If not all children are joined, give error:
     if (currentProcess->first_child != NULL) {
         USLOSS_Console("Error: Process quit before joining with all children.");
         // USLOSS_Halt(1);
     }
-    USLOSS_Console("Halting process quit\n");
+    //USLOSS_Console("Halting process quit\n");
     // Halt the current process:
     currentProcess->quit = 1;
     currentProcess->quitStatus = status;
 
     //free(currentProcess->stack);
-    currentProcess->in_use = 0;
+    //currentProcess->in_use = 0;
+
     // Switch to the next process:
-    USLOSS_Console("Temp switch quit\n");
+    //USLOSS_Console("Temp switch quit\n");
     TEMP_switchTo(switchToPid);
-    USLOSS_Console("Restore interrupts quit\n");
+    //USLOSS_Console("Restore interrupts quit\n");
     restoreInterrupts(old_psr);
+    assert(0);
 }
 
 int getpid(void) {
