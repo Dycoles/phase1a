@@ -95,7 +95,7 @@ void phase1_init(void) {
         process_table[i].status = 0;
     }
     // create init process
-    struct process *initProcess = &process_table[0];
+    struct process *initProcess = &process_table[1];
     initProcess -> PID = 1;
     initProcess -> priority = 6;
     initProcess -> stackSize = USLOSS_MIN_STACK;
@@ -152,6 +152,15 @@ int spork(char *name, int (*startFunc)(void *), void *arg, int stackSize, int pr
     }
     // find an empty slot
     int slot = currentPid % MAXPROC;
+    int attempts = 1;
+    while (process_table[slot].in_use) {
+        currentPid++;
+        slot = currentPid % MAXPROC;
+        if (++attempts > MAXPROC) {
+            USLOSS_Console("Error: Too many processes active.\n");
+            USLOSS_Halt(1);
+        }
+    }
 
     // fill the table and assign it as a child of the previous process
     strcpy(process_table[slot].name, name);
@@ -208,14 +217,15 @@ int join(int *status) {
         return -3;
     }
     // Altered for loop makes it run slower, but helps match output exactly
-    for (int i = MAXPROC; i >= 0; i--) {
+    for (int i = currentPid; i >= 0; i--) {
+        int slot = i % MAXPROC;
         // if child exists, return PID of the child
-        if (process_table[i].parentPid == currentProcess->PID && process_table[i].quit == 1 && process_table[i].in_use == 1) {
-            *status = process_table[i].quitStatus;
-            process_table[i].in_use = 0;
+        if (process_table[slot].parentPid == currentProcess->PID && process_table[slot].quit == 1 && process_table[slot].in_use == 1) {
+            *status = process_table[slot].quitStatus;
+            process_table[slot].in_use = 0;
             //free(process_table[i].stack);
             restoreInterrupts(old_psr);
-            return process_table[i].PID;
+            return process_table[slot].PID;
         }
     }
     // return -2 if the process does not have any children
@@ -280,7 +290,7 @@ void dumpProcesses(void) {
             } else {
                 printf("Blocked\n");
             }
-
+            
             /*printf("Name: %s\n", process_table[i].name);
             printf("PID: %d\n", process_table[i].PID);
             printf("Parent PID: %d\n", process_table[i].parentPid);
@@ -301,23 +311,23 @@ void TEMP_switchTo(int newpid) {
         USLOSS_Halt(1);
     }
     int old_psr = disableInterrupts();
-     struct process *newProcess = NULL;
-     for (int i = 0; i < MAXPROC; i++) {
-         if (process_table[i].PID == newpid && process_table[i].in_use) {
-             newProcess = &process_table[i];
-             break;
-         }
-     }
-     // Ensure the process exists
-     if (newProcess == NULL) {
-         USLOSS_Console("Error: Process %d not found!\n", newpid);
-         USLOSS_Halt(1);
-     }
-     
-     struct process *oldProcess = currentProcess;
-     currentProcess = newProcess;
-     USLOSS_ContextSwitch(&oldProcess->state, &newProcess->state);
-     restoreInterrupts(old_psr);
+    struct process *newProcess = NULL;
+    for (int i = 0; i < MAXPROC; i++) {
+        if (process_table[i].PID == newpid && process_table[i].in_use) {
+            newProcess = &process_table[i];
+            break;
+        }
+    }
+    // Ensure the process exists
+    if (newProcess == NULL) {
+        USLOSS_Console("Error: Process %d not found!\n", newpid);
+        USLOSS_Halt(1);
+    }
+    
+    struct process *oldProcess = currentProcess;
+    currentProcess = newProcess;
+    USLOSS_ContextSwitch(&oldProcess->state, &newProcess->state);
+    restoreInterrupts(old_psr);
 }
 
 //void zap(int pid)
