@@ -84,7 +84,7 @@ void phase1_init(void) {
         process_table[i].PID = -1;
         process_table[i].arg = NULL;
         process_table[i].in_use = 0;
-        process_table[i].parentPid = -1;
+        process_table[i].parentPid = 0;
         process_table[i].priority = -1;
 
         process_table[i].quit = 0;
@@ -263,15 +263,33 @@ int getpid(void) {
 void dumpProcesses(void) {
     int old_psr = disableInterrupts();
     // prints debug info about process table -> should be easiest function, just need to access USLOSS console and print info
+    //printf("**************** Calling dumpProcesses() *******************\n");
+    printf("PID  PPID  NAME              PRIORITY  STATE\n");
     for (int i = 0; i < MAXPROC; i++) {
-        printf("Name: %s\n", process_table[i].name);
-        printf("PID: %d\n", process_table[i].PID);
-        printf("Parent PID: %d\n", process_table[i].parentPid);
-        printf("Priority: %d\n", process_table[i].priority);
-        if (process_table[i].status == 0) {
-            printf("Running! \n");
-        } else {
-            printf("Blocked! \n");
+        if (process_table[i].in_use) {
+            printf("%3i  %4i  %-17s %d         ",
+                process_table[i].PID, process_table[i].parentPid, process_table[i].name,
+                process_table[i].priority);
+            // Determine what to print for the running state:
+            if (process_table[i].PID == currentProcess->PID) {
+                printf("Running\n");
+            } else if (process_table[i].quit) {    // Unsure if PID is correct here
+                printf("Terminated(%d)\n", process_table[i].PID);
+            } else if (process_table[i].status == 0) {
+                printf("Runnable\n");
+            } else {
+                printf("Blocked\n");
+            }
+
+            /*printf("Name: %s\n", process_table[i].name);
+            printf("PID: %d\n", process_table[i].PID);
+            printf("Parent PID: %d\n", process_table[i].parentPid);
+            printf("Priority: %d\n", process_table[i].priority);
+            if (process_table[i].status == 0) {
+                printf("Running! \n");
+            } else {
+                printf("Blocked! \n");
+            }*/
         }
     }
     restoreInterrupts(old_psr);
