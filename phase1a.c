@@ -179,7 +179,10 @@ int spork(char *name, int (*startFunc)(void *), void *arg, int stackSize, int pr
 
     process_table[slot].parentPid = currentProcess -> PID;
     // set parents and ensure there is space for children 
-    if (currentProcess -> first_child == NULL) {
+    process_table[slot].next_sibling = currentProcess->first_child;
+    currentProcess->first_child = &process_table[slot];
+    // Unsure if the above is better than below or not, it doesn't seem to affect things
+    /*if (currentProcess -> first_child == NULL) {
         currentProcess -> first_child = &process_table[slot];
     } else {
         // search for empty sibling if children already exist
@@ -188,7 +191,7 @@ int spork(char *name, int (*startFunc)(void *), void *arg, int stackSize, int pr
             child = child -> next_sibling;
         }
         child -> next_sibling = &process_table[slot];
-    }
+    }*/
     
     // Initialize context for process
     USLOSS_ContextInit(&(process_table[slot].state), process_table[slot].stack, process_table[slot].stackSize, NULL, wrapper);
@@ -204,7 +207,8 @@ int join(int *status) {
         restoreInterrupts(old_psr);
         return -3;
     }
-    for (int i = 0; i < MAXPROC; i++) {
+    // Altered for loop makes it run slower, but helps match output exactly
+    for (int i = MAXPROC; i >= 0; i--) {
         // if child exists, return PID of the child
         if (process_table[i].parentPid == currentProcess->PID && process_table[i].quit == 1 && process_table[i].in_use == 1) {
             *status = process_table[i].quitStatus;
@@ -228,10 +232,13 @@ void quit_phase_1a(int status, int switchToPid) {
     int old_psr = disableInterrupts();
     //USLOSS_Console("Interrupts disabled quit\n");
     // If not all children are joined, give error:
-    if (currentProcess->first_child != NULL) {
-        USLOSS_Console("Error: Process quit before joining with all children.");
-        // USLOSS_Halt(1);
+    for (struct process *child = currentProcess->first_child; child != NULL; child = child->next_sibling) {
+        if (child->quit != 1) {
+            USLOSS_Console("Error: Process quit before joining with all children.");
+            // USLOSS_Halt(1);
+        }
     }
+
     //USLOSS_Console("Halting process quit\n");
     // Halt the current process:
     currentProcess->quit = 1;
