@@ -7,8 +7,11 @@
 // TODO run queues?
 
 struct runQueue {
-    struct process *current;
-    struct process *next;
+    struct process *head;
+}
+
+struct zapQueue {
+    struct process *head;
 }
 
 struct process {
@@ -28,10 +31,9 @@ struct process {
     // check if we have already quit the process
     int quit;
     int quitStatus;
-    struct process *parent;
+    int zapped;
     struct process *next_sibling;
     struct process *first_child;
-    struct process *next_process;
     USLOSS_Context state;
 };
 
@@ -41,8 +43,6 @@ struct process process_table[MAXPROC];
 // current process (set to NULL)
 struct process *currentProcess = NULL;
 // run queue
-struct runQueue *queue = NULL;
-
 int disableInterrupts() {
     int old_psr = USLOSS_PsrGet();
     if (USLOSS_PsrSet(old_psr & ~USLOSS_PSR_CURRENT_INT) != 0) {
@@ -101,7 +101,8 @@ int launchPhases() {
     }
     // USLOSS_Console("The result is %d\n", result);
     // USLOSS_Console("Phase 1A TEMPORARY HACK: init() manually switching to testcase_main() after using spork() to create it.\n");
-    TEMP_switchTo(result);
+    // TEMP_switchTo(result);
+    dispatcher();
     return 255;
 }
 
@@ -113,10 +114,8 @@ void phase1_init(void) {
     for (int i = 0; i < MAXPROC; i++) {
         memset(process_table[i].name, 0, MAXNAME);
 
-        process_table[i].next_process = NULL;
         process_table[i].first_child = NULL;
         process_table[i].next_sibling = NULL;
-        process_table[i].parent = NULL;
 
         process_table[i].PID = 0;
         process_table[i].arg = NULL;
@@ -130,6 +129,7 @@ void phase1_init(void) {
         process_table[i].stackSize = 0;
         process_table[i].startFunc = NULL;
         process_table[i].status = 0;
+        process_table[i].zapped = 0;
     }
     // create init process
     struct process *initProcess = &process_table[1];
@@ -142,6 +142,7 @@ void phase1_init(void) {
     initProcess -> startFunc = launchPhases;
     currentPid = initProcess -> PID;
     USLOSS_ContextInit(&(initProcess->state), initProcess->stack, initProcess->stackSize, NULL, wrapper);
+    runQueue -> current = currentProcess;
     currentPid++;
     restoreInterrupts(old_psr);
 }
@@ -186,6 +187,7 @@ int spork(char *name, int (*startFunc)(void *), void *arg, int stackSize, int pr
     thisProcess -> stack = malloc(stackSize);
     thisProcess -> in_use = 1;
     thisProcess -> status = 0;
+    thisProcess -> zapped = 0;
 
     // set arg
     if (arg == NULL) {
@@ -236,7 +238,7 @@ int join(int *status) {
     return -2;
 }
 
-void quit_phase_1a(int status, int switchToPid) {
+void quit(int status) {
     //USLOSS_Console("quitting\n");
     if ((USLOSS_PsrGet() & USLOSS_PSR_CURRENT_MODE) == 0 ) {
         USLOSS_Console("ERROR: Someone attempted to call quit_phase_1a while in user mode!\n");
@@ -262,7 +264,8 @@ void quit_phase_1a(int status, int switchToPid) {
 
     // Switch to the next process:
     //USLOSS_Console("Temp switch quit\n");
-    TEMP_switchTo(switchToPid);
+    // TEMP_switchTo(switchToPid);
+    dispatcher();
     //USLOSS_Console("Restore interrupts quit\n");
     restoreInterrupts(old_psr);
     assert(0);
@@ -294,42 +297,6 @@ void dumpProcesses(void) {
                 printf("Blocked\n");
             }
         }
-    }
-    restoreInterrupts(old_psr);
-}
-
-void TEMP_switchTo(int newpid) {
-    if ((USLOSS_PsrGet() & USLOSS_PSR_CURRENT_MODE) == 0 ) {
-        USLOSS_Console("ERROR: Someone attempted to call spork while in user mode!\n");
-        USLOSS_Halt(1);
-    }
-    // USLOSS_Console("%d\n", currentProcess -> PID);
-    // USLOSS_Console("%d\n", newpid);
-    int old_psr = disableInterrupts();
-    struct process *newProcess = NULL;
-    for (int i = 0; i < MAXPROC; i++) {
-        if (process_table[i].PID == newpid && process_table[i].in_use) {
-            newProcess = &process_table[i];
-            break;
-        }
-    }
-    // Ensure the process exists
-    if (newProcess == NULL) {
-        USLOSS_Console("Error: Process %d not found!\n", newpid);
-        USLOSS_Halt(1);
-    }
-    if (currentProcess == NULL) {
-        // USLOSS_Console("cur process is null\n");
-    }
-    
-    struct process *oldProcess = currentProcess;
-    currentProcess = newProcess;
-    // USLOSS_Console("%s\n", oldProcess->name);
-    // USLOSS_Console("%s\n", newProcess->name);
-    if (oldProcess == NULL) {
-        USLOSS_ContextSwitch(NULL, &newProcess->state);
-    } else {
-        USLOSS_ContextSwitch(&oldProcess->state, &newProcess->state);
     }
     restoreInterrupts(old_psr);
 }
@@ -383,10 +350,22 @@ void zap(int pid) {
         USLOSS_Halt(1);
     }
 
-    // after error checking, we block process pid until it dies (set block == 1)
+    // process a (cur process) zaps b (int pid)
+    process_table[pid % MAXPROC].zapped = 1;
+    // add this process to zapper queue
+
+    // -> CODE HERE
+
+    // process a is blocked, b must complete before a can run (b is "zapped")
+    blockMe();
+    // -> the zapped process CANNOT block itself
+    // once process b completes, a is unblocked and runs again
 }
 
 void blockMe() {
+    if (currentProcess -> zapped == 1) {
+        quit(currentProcess -> status);
+    }
     // block the current process in the process table; >=1 is blocked
     currentProcess -> status = 1;
     // call the dispatcher
@@ -396,13 +375,15 @@ void blockMe() {
 int unblockProc(int pid) {
     // if the process was not blocked or does not exist, return -2;
     if (process_table[pid % MAXPROC] == NULL) {
+        USLOSS_Console("The process does not exist\n");
         return -2;
     }
     if (process_table[pid % MAXPROC].status == 0) {
         USLOSS_Console("The process was not blocked\n");
         return -2;
     }
-    // unblock the process and place it onto the run queue
+    // unblock the process
+    process_table[pid % MAXPROC].status = 0;
     // call the dispatcher
     dispatcher();
     return 0;
