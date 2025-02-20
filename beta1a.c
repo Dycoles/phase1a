@@ -80,7 +80,7 @@ int bootstrap() {
         USLOSS_Halt(1);
     }
     int old_psr = disableInterrupts();
-    USLOSS_Console("The result is %d\n", result);
+    // USLOSS_Console("The result is %d\n", result);
     TEMP_switchTo(result);
     return 255;
 }
@@ -218,7 +218,7 @@ int join(int *status) {
 void quit_phase_1a(int status, int switchToPid) {
     //USLOSS_Console("quitting\n");
     if ((USLOSS_PsrGet() & USLOSS_PSR_CURRENT_MODE) == 0 ) {
-        USLOSS_Console("ERROR: Someone attempted to call spork while in user mode!\n");
+        USLOSS_Console("ERROR: Someone attempted to call quit while in user mode!\n");
         // USLOSS_Halt(1);
     }
     int old_psr = disableInterrupts();
@@ -293,7 +293,7 @@ void TEMP_switchTo(int newpid) {
         USLOSS_Halt(1);
     }
     // USLOSS_Console("%d\n", currentProcess -> PID);
-    USLOSS_Console("%d\n", newpid);
+    // USLOSS_Console("%d\n", newpid);
     int old_psr = disableInterrupts();
     struct process *newProcess = NULL;
     for (int i = 0; i < MAXPROC; i++) {
@@ -308,13 +308,13 @@ void TEMP_switchTo(int newpid) {
         USLOSS_Halt(1);
     }
     if (currentProcess == NULL) {
-        USLOSS_Console("cur process is null\n");
+        // USLOSS_Console("cur process is null\n");
     }
     
     struct process *oldProcess = currentProcess;
     currentProcess = newProcess;
     // USLOSS_Console("%s\n", oldProcess->name);
-    USLOSS_Console("%s\n", newProcess->name);
+    // USLOSS_Console("%s\n", newProcess->name);
     if (oldProcess == NULL) {
         USLOSS_ContextSwitch(NULL, &newProcess->state);
     } else {
