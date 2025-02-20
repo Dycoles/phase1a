@@ -388,7 +388,7 @@ void zap(int pid) {
 
 void blockMe() {
     // block the current process in the process table; >=1 is blocked
-    currentProcess -> status >= 1;
+    currentProcess -> status = 1;
     // call the dispatcher
     dispatcher();
 }
