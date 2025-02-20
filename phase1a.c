@@ -38,11 +38,18 @@ struct process *currentProcess = NULL;
 
 int disableInterrupts() {
     int old_psr = USLOSS_PsrGet();
-    if (USLOSS_PsrSet(USLOSS_PsrGet() & ~USLOSS_PSR_CURRENT_INT) != 0) {
-        USLOSS_Console("ERROR: USLOSS_PsrSet failed in disableInterrupts\n");
+    if (USLOSS_PsrSet(old_psr & ~USLOSS_PSR_CURRENT_INT) != 0) {
+        USLOSS_Console("ERROR: cannot disable interrupts in user mode\n");
         USLOSS_Halt(1);
     }
     return old_psr;
+}
+
+void enableInterrupts() {
+    if ((USLOSS_PsrGet() & USLOSS_PSR_CURRENT_MODE) == 0) {
+        USLOSS_Console("ERROR: cannot enable interrupts in user mode\n");
+    }
+    USLOSS_PsrSet(USLOSS_PsrGet() | USLOSS_PSR_CURRENT_INT);
 }
 
 void restoreInterrupts(int old_psr) {
@@ -50,22 +57,45 @@ void restoreInterrupts(int old_psr) {
 }
 
 void wrapper(void) {
+    // USLOSS_Console("Process name is: %s\n", currentProcess -> name);
     int result;
     int (*func)(void *) = currentProcess->startFunc;
     void *arg = currentProcess->arg;
-
+    // enable interrupts before calling func
+    enableInterrupts();
     result = func(arg);
+    // USLOSS_Console("Result is: %d\n", result);
+    // USLOSS_Console("Wrapper complete, starting quit\n");
+    // if function returns, call quit
     quit_phase_1a(result, 1);
 }
 
 int testcaseWrapper(void *) {
-    int old_psr = disableInterrupts();
+    // USLOSS_Console("Test case wrapper started\n");
     if (testcase_main() == 0){
         USLOSS_Console("Phase 1A TEMPORARY HACK: testcase_main() returned, simulation will now halt.\n");
         USLOSS_Halt(0);
     }
-    restoreInterrupts(old_psr);
+    // USLOSS_Console("Test case wrapper returned 1\n");
     return 1;
+}
+
+int launchPhases() {
+    phase2_start_service_processes();
+    phase3_start_service_processes();
+    phase4_start_service_processes();
+    phase5_start_service_processes();
+
+    int result = spork("testcase_main", (*testcaseWrapper), NULL, USLOSS_MIN_STACK, 3);
+    if (result < 0) {
+        // print errors here then halt
+        USLOSS_Console("Errors in spork returned < 0\n");
+        USLOSS_Halt(1);
+    }
+    // USLOSS_Console("The result is %d\n", result);
+    // USLOSS_Console("Phase 1A TEMPORARY HACK: init() manually switching to testcase_main() after using spork() to create it.\n");
+    TEMP_switchTo(result);
+    return 255;
 }
 
 void phase1_init(void) {
@@ -81,7 +111,7 @@ void phase1_init(void) {
         process_table[i].next_sibling = NULL;
         process_table[i].parent = NULL;
 
-        process_table[i].PID = -1;
+        process_table[i].PID = 0;
         process_table[i].arg = NULL;
         process_table[i].in_use = 0;
         process_table[i].parentPid = 0;
@@ -102,44 +132,21 @@ void phase1_init(void) {
     initProcess -> stack = malloc(initProcess -> stackSize);
     strcpy(initProcess -> name, "init");
     initProcess->in_use = 1;
-    currentProcess = initProcess;
+    initProcess -> startFunc = launchPhases;
     currentPid = initProcess -> PID;
     USLOSS_ContextInit(&(initProcess->state), initProcess->stack, initProcess->stackSize, NULL, wrapper);
-    USLOSS_Console("Phase 1A TEMPORARY HACK: init() manually switching to PID 1.\n");
-    TEMP_switchTo(currentPid);
-    currentPid++;;
-
-    phase2_start_service_processes();
-    phase3_start_service_processes();
-    phase4_start_service_processes();
-    phase5_start_service_processes();
-
-    // start testcase_main, should have priority of 3
-    
-    result = spork("testcase_main", (*testcaseWrapper), NULL, USLOSS_MIN_STACK, 3);
-    if (result < 0) {
-        // print errors here then halt
-        USLOSS_Halt(1);
-    }
-    USLOSS_Console("Phase 1A TEMPORARY HACK: init() manually switching to testcase_main() after using spork() to create it.\n");
-    TEMP_switchTo(result);
-    // clean up with join
-    int status;
-    while (1) {
-        if (join(&status) == -2) {
-            // print out an error message here
-            // call USLOSS_halt
-            USLOSS_Halt(1);
-            restoreInterrupts(old_psr);
-            return; // unsure if this is how to quit
-        }
-    }
+    currentPid++;
     restoreInterrupts(old_psr);
 }
 
 
 int spork(char *name, int (*startFunc)(void *), void *arg, int stackSize, int priority) {
+    if ((USLOSS_PsrGet() & USLOSS_PSR_CURRENT_MODE) == 0) {
+        USLOSS_Console("ERROR: Someone attempted to call spork while in user mode!\n");
+        USLOSS_Halt(1);
+    }
     int old_psr = disableInterrupts();
+
     // if stack size smaller than USLOSS_MIN_STACK, return -2
     if (stackSize < USLOSS_MIN_STACK) {
         restoreInterrupts(old_psr);
@@ -157,56 +164,45 @@ int spork(char *name, int (*startFunc)(void *), void *arg, int stackSize, int pr
         currentPid++;
         slot = currentPid % MAXPROC;
         if (++attempts > MAXPROC) {
-            USLOSS_Console("Error: Too many processes active.\n");
-            USLOSS_Halt(1);
+            restoreInterrupts(old_psr);
+            return -1;
         }
     }
 
     // fill the table and assign it as a child of the previous process
-    strcpy(process_table[slot].name, name);
-    process_table[slot].startFunc = startFunc;
-    process_table[slot].PID = currentPid;
-    process_table[slot].priority = priority;
-    process_table[slot].stackSize = stackSize;
-    process_table[slot].stack = malloc(stackSize);
-    process_table[slot].in_use = 1;
-    process_table[slot].status = 0;
+    struct process *thisProcess = &process_table[slot];
+    strcpy(thisProcess -> name, name);
+    thisProcess -> startFunc = startFunc;
+    thisProcess -> PID = currentPid;
+    thisProcess -> priority = priority;
+    thisProcess -> stackSize = stackSize;
+    thisProcess -> stack = malloc(stackSize);
+    thisProcess -> in_use = 1;
+    thisProcess -> status = 0;
 
     // set arg
     if (arg == NULL) {
-        process_table[slot].arg = NULL;
+        thisProcess -> arg = NULL;
     } else {
-        process_table[slot].arg = arg;
+        thisProcess -> arg = arg;
     }
 
     // invalid allocation of stack
-    if (process_table[slot].stack == NULL) {
+    if (thisProcess -> stack == NULL) {
         restoreInterrupts(old_psr);
         return -2;
     }
     currentPid++;
 
-    process_table[slot].parentPid = currentProcess -> PID;
+    thisProcess -> parentPid = currentProcess -> PID;
     // set parents and ensure there is space for children 
-    process_table[slot].next_sibling = currentProcess->first_child;
-    currentProcess->first_child = &process_table[slot];
-    // Unsure if the above is better than below or not, it doesn't seem to affect things
-    /*if (currentProcess -> first_child == NULL) {
-        currentProcess -> first_child = &process_table[slot];
-    } else {
-        // search for empty sibling if children already exist
-        struct process *child = currentProcess->first_child;
-        while (child -> next_sibling != NULL) {
-            child = child -> next_sibling;
-        }
-        child -> next_sibling = &process_table[slot];
-    }*/
-    
+    thisProcess -> next_sibling = currentProcess->first_child;
+    currentProcess->first_child = thisProcess;
     // Initialize context for process
-    USLOSS_ContextInit(&(process_table[slot].state), process_table[slot].stack, process_table[slot].stackSize, NULL, wrapper);
+    USLOSS_ContextInit(&(thisProcess->state), thisProcess->stack, thisProcess->stackSize, NULL, wrapper);
     // return PID of the child process
     restoreInterrupts(old_psr);
-    return process_table[slot].PID;
+    return thisProcess -> PID;
 }
 
 int join(int *status) {
@@ -236,16 +232,16 @@ int join(int *status) {
 void quit_phase_1a(int status, int switchToPid) {
     //USLOSS_Console("quitting\n");
     if ((USLOSS_PsrGet() & USLOSS_PSR_CURRENT_MODE) == 0 ) {
-        USLOSS_Console("ERROR: Someone attempted to call spork while in user mode!\n");
-        // USLOSS_Halt(1);
+        USLOSS_Console("ERROR: Someone attempted to call quit_phase_1a while in user mode!\n");
+        USLOSS_Halt(1);
     }
     int old_psr = disableInterrupts();
     //USLOSS_Console("Interrupts disabled quit\n");
     // If not all children are joined, give error:
     for (struct process *child = currentProcess->first_child; child != NULL; child = child->next_sibling) {
-        if (child->quit != 1) {
-            USLOSS_Console("Error: Process quit before joining with all children.");
-            // USLOSS_Halt(1);
+        if (child->in_use == 1) {
+            USLOSS_Console("ERROR: Process pid %d called quit() while it still had children.\n", currentProcess->PID);
+            USLOSS_Halt(1);
         }
     }
 
@@ -284,7 +280,7 @@ void dumpProcesses(void) {
             if (process_table[i].PID == currentProcess->PID) {
                 printf("Running\n");
             } else if (process_table[i].quit) {    // Unsure if PID is correct here
-                printf("Terminated(%d)\n", process_table[i].PID);
+                printf("Terminated(%d)\n", process_table[i].quitStatus);
             } else if (process_table[i].status == 0) {
                 printf("Runnable\n");
             } else {
@@ -310,6 +306,8 @@ void TEMP_switchTo(int newpid) {
         USLOSS_Console("ERROR: Someone attempted to call spork while in user mode!\n");
         USLOSS_Halt(1);
     }
+    // USLOSS_Console("%d\n", currentProcess -> PID);
+    // USLOSS_Console("%d\n", newpid);
     int old_psr = disableInterrupts();
     struct process *newProcess = NULL;
     for (int i = 0; i < MAXPROC; i++) {
@@ -323,10 +321,19 @@ void TEMP_switchTo(int newpid) {
         USLOSS_Console("Error: Process %d not found!\n", newpid);
         USLOSS_Halt(1);
     }
+    if (currentProcess == NULL) {
+        // USLOSS_Console("cur process is null\n");
+    }
     
     struct process *oldProcess = currentProcess;
     currentProcess = newProcess;
-    USLOSS_ContextSwitch(&oldProcess->state, &newProcess->state);
+    // USLOSS_Console("%s\n", oldProcess->name);
+    // USLOSS_Console("%s\n", newProcess->name);
+    if (oldProcess == NULL) {
+        USLOSS_ContextSwitch(NULL, &newProcess->state);
+    } else {
+        USLOSS_ContextSwitch(&oldProcess->state, &newProcess->state);
+    }
     restoreInterrupts(old_psr);
 }
 
