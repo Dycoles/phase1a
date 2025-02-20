@@ -368,24 +368,40 @@ void zap(int pid) {
         USLOSS_Console("Cannot zap init\n");
         USLOSS_Halt(1);
     }
-    if (pid == currentPid) {
+    if (pid == currentProcess -> PID) {
         USLOSS_Console("Cannot zap current process\n");
         USLOSS_Halt(1);
     }
     // if pid that we zap process_table[i].quit == 1, error then halt
+    if (process_table[pid % MAXPROC].quit == 1) {
+        USLOSS_Console("Process has already been terminated\n");
+        USLOSS_Halt(1);
+    }
     // if pid that we zap not in process table, error then halt
+    if (process_table[pid % MAXPROC] == NULL) {
+        USLOSS_Console("Process for pid does not exist\n");
+        USLOSS_Halt(1);
+    }
 
     // after error checking, we block process pid until it dies (set block == 1)
 }
 
 void blockMe() {
-    // block the current process in the process table
+    // block the current process in the process table; >=1 is blocked
+    currentProcess -> status = 1;
     // call the dispatcher
     dispatcher();
 }
 
 int unblockProc(int pid) {
     // if the process was not blocked or does not exist, return -2;
+    if (process_table[pid % MAXPROC] == NULL) {
+        return -2;
+    }
+    if (process_table[pid % MAXPROC].status == 0) {
+        USLOSS_Console("The process was not blocked\n");
+        return -2;
+    }
     // unblock the process and place it onto the run queue
     // call the dispatcher
     dispatcher();
