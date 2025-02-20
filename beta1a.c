@@ -163,8 +163,8 @@ int spork(char *name, int (*startFunc)(void *), void *arg, int stackSize, int pr
         currentPid++;
         slot = currentPid % MAXPROC;
         if (++attempts > MAXPROC) {
-            USLOSS_Console("Error: Too many processes active.\n");
-            USLOSS_Halt(1);
+            restoreInterrupts(old_psr);
+            return -1;
         }
     }
 
