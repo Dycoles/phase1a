@@ -6,6 +6,11 @@
 
 // TODO run queues?
 
+struct runQueue {
+    struct process *current;
+    struct process *next;
+}
+
 struct process {
     int PID;
     int priority;
@@ -35,6 +40,8 @@ int currentPid = 1;
 struct process process_table[MAXPROC];
 // current process (set to NULL)
 struct process *currentProcess = NULL;
+// run queue
+struct runQueue *queue = NULL;
 
 int disableInterrupts() {
     int old_psr = USLOSS_PsrGet();
@@ -286,16 +293,6 @@ void dumpProcesses(void) {
             } else {
                 printf("Blocked\n");
             }
-            
-            /*printf("Name: %s\n", process_table[i].name);
-            printf("PID: %d\n", process_table[i].PID);
-            printf("Parent PID: %d\n", process_table[i].parentPid);
-            printf("Priority: %d\n", process_table[i].priority);
-            if (process_table[i].status == 0) {
-                printf("Running! \n");
-            } else {
-                printf("Blocked! \n");
-            }*/
         }
     }
     restoreInterrupts(old_psr);
@@ -337,8 +334,60 @@ void TEMP_switchTo(int newpid) {
     restoreInterrupts(old_psr);
 }
 
-//void zap(int pid)
+void dispatcher() {
+    // context switch to the highest priority process and run it
+    // highest priority is lowest number
+    if ((USLOSS_PsrGet() & USLOSS_PSR_CURRENT_MODE) == 0 ) {
+        USLOSS_Console("ERROR: Someone attempted to call spork while in user mode!\n");
+        USLOSS_Halt(1);
+    }
+    int old_psr = disableInterrupts();
+    struct process *newProcess = NULL;
+    // get highest priority process -> highest priority at front of queue
+    if (queue -> current != NULL) {
+        newProcess = queue->current;
+        // remove process from runqueue?
+    }
+    // Ensure the process exists
+    if (newProcess == NULL) {
+        USLOSS_Console("Error: Process %d not found!\n", newpid);
+        USLOSS_Halt(1);
+    }
+    struct process *oldProcess = currentProcess;
+    currentProcess = newProcess;
+    if (oldProcess == NULL) {
+        USLOSS_ContextSwitch(NULL, &newProcess->state);
+    } else {
+        USLOSS_ContextSwitch(&oldProcess->state, &newProcess->state);
+    }
+    restoreInterrupts(old_psr);
+}
 
-//void blockMe()
+void zap(int pid) {
+    if (pid == 1) {
+        USLOSS_Console("Cannot zap init\n");
+        USLOSS_Halt(1);
+    }
+    if (pid == currentPid) {
+        USLOSS_Console("Cannot zap current process\n");
+        USLOSS_Halt(1);
+    }
+    // if pid that we zap process_table[i].quit == 1, error then halt
+    // if pid that we zap not in process table, error then halt
 
-//int unblockProc(int pid)
+    // after error checking, we block process pid until it dies (set block == 1)
+}
+
+void blockMe() {
+    // block the current process in the process table
+    // call the dispatcher
+    dispatcher();
+}
+
+int unblockProc(int pid) {
+    // if the process was not blocked or does not exist, return -2;
+    // unblock the process and place it onto the run queue
+    // call the dispatcher
+    dispatcher();
+    return 0;
+}
