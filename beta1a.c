@@ -98,14 +98,7 @@ int launchPhases() {
     return 255;
 }
 
-void illegal_handler(int type, void *arg) {
-    USLOSS_Console("ERROR: Illegal instruction encountered! Type: %d\n", type);
-    USLOSS_Halt(1);
-}
-
 void phase1_init(void) {
-    USLOSS_IntVec[USLOSS_ILLEGAL_INT] = illegal_handler;
-
     int old_psr = disableInterrupts();
     // result of spork operation
     int result;
@@ -245,9 +238,9 @@ void quit_phase_1a(int status, int switchToPid) {
     //USLOSS_Console("Interrupts disabled quit\n");
     // If not all children are joined, give error:
     for (struct process *child = currentProcess->first_child; child != NULL; child = child->next_sibling) {
-        if (child->quit != 1) {
-            USLOSS_Console("Error: Process quit before joining with all children.");
-            // USLOSS_Halt(1);
+        if (child->in_use == 1) {
+            USLOSS_Console("ERROR: Process pid %d called quit() while it still had children.\n", currentProcess->PID);
+            USLOSS_Halt(1);
         }
     }
 
@@ -286,7 +279,7 @@ void dumpProcesses(void) {
             if (process_table[i].PID == currentProcess->PID) {
                 printf("Running\n");
             } else if (process_table[i].quit) {    // Unsure if PID is correct here
-                printf("Terminated(%d)\n", process_table[i].PID);
+                printf("Terminated(%d)\n", process_table[i].quitStatus);
             } else if (process_table[i].status == 0) {
                 printf("Runnable\n");
             } else {
