@@ -98,7 +98,14 @@ int launchPhases() {
     return 255;
 }
 
+void illegal_handler(int type, void *arg) {
+    USLOSS_Console("ERROR: Illegal instruction encountered! Type: %d\n", type);
+    USLOSS_Halt(1);
+}
+
 void phase1_init(void) {
+    USLOSS_IntVec[USLOSS_ILLEGAL_INT] = illegal_handler;
+
     int old_psr = disableInterrupts();
     // result of spork operation
     int result;
@@ -231,8 +238,8 @@ int join(int *status) {
 void quit_phase_1a(int status, int switchToPid) {
     //USLOSS_Console("quitting\n");
     if ((USLOSS_PsrGet() & USLOSS_PSR_CURRENT_MODE) == 0 ) {
-        USLOSS_Console("ERROR: Someone attempted to call quit while in user mode!\n");
-        // USLOSS_Halt(1);
+        USLOSS_Console("ERROR: Someone attempted to call quit_phase_1a while in user mode!\n");
+        USLOSS_Halt(1);
     }
     int old_psr = disableInterrupts();
     //USLOSS_Console("Interrupts disabled quit\n");
