@@ -38,11 +38,18 @@ struct process *currentProcess = NULL;
 
 int disableInterrupts() {
     int old_psr = USLOSS_PsrGet();
-    if (USLOSS_PsrSet(USLOSS_PsrGet() & ~USLOSS_PSR_CURRENT_INT) != 0) {
-        USLOSS_Console("ERROR: USLOSS_PsrSet failed in disableInterrupts\n");
+    if (USLOSS_PsrSet(old_psr & ~USLOSS_PSR_CURRENT_INT) != 0) {
+        USLOSS_Console("ERROR: cannot disable interrupts in user mode\n");
         USLOSS_Halt(1);
     }
     return old_psr;
+}
+
+void enableInterrupts() {
+    if ((USLOSS_PsrGet() & USLOSS_PSR_CURRENT_MODE) == 0) {
+        USLOSS_Console("ERROR: cannot enable interrupts in user mode\n");
+    }
+    USLOSS_PsrSet(USLOSS_PsrGet() | USLOSS_PSR_CURRENT_INT);
 }
 
 void restoreInterrupts(int old_psr) {
@@ -50,25 +57,30 @@ void restoreInterrupts(int old_psr) {
 }
 
 void wrapper(void) {
+    // USLOSS_Console("Process name is: %s\n", currentProcess -> name);
     int result;
     int (*func)(void *) = currentProcess->startFunc;
     void *arg = currentProcess->arg;
-
+    // enable interrupts before calling func
+    enableInterrupts();
     result = func(arg);
+    // USLOSS_Console("Result is: %d\n", result);
+    // USLOSS_Console("Wrapper complete, starting quit\n");
+    // if function returns, call quit
     quit_phase_1a(result, 1);
 }
 
 int testcaseWrapper(void *) {
-    // int old_psr = disableInterrupts();
+    // USLOSS_Console("Test case wrapper started\n");
     if (testcase_main() == 0){
         USLOSS_Console("Phase 1A TEMPORARY HACK: testcase_main() returned, simulation will now halt.\n");
         USLOSS_Halt(0);
     }
-    // restoreInterrupts(old_psr);
+    // USLOSS_Console("Test case wrapper returned 1\n");
     return 1;
 }
 
-int bootstrap() {
+int launchPhases() {
     phase2_start_service_processes();
     phase3_start_service_processes();
     phase4_start_service_processes();
@@ -77,10 +89,11 @@ int bootstrap() {
     int result = spork("testcase_main", (*testcaseWrapper), NULL, USLOSS_MIN_STACK, 3);
     if (result < 0) {
         // print errors here then halt
+        USLOSS_Console("Errors in spork returned < 0\n");
         USLOSS_Halt(1);
     }
-    int old_psr = disableInterrupts();
     // USLOSS_Console("The result is %d\n", result);
+    USLOSS_Console("Phase 1A TEMPORARY HACK: init() manually switching to testcase_main() after using spork() to create it.\n");
     TEMP_switchTo(result);
     return 255;
 }
@@ -119,7 +132,7 @@ void phase1_init(void) {
     initProcess -> stack = malloc(initProcess -> stackSize);
     strcpy(initProcess -> name, "init");
     initProcess->in_use = 1;
-    initProcess -> startFunc = bootstrap;
+    initProcess -> startFunc = launchPhases;
     currentPid = initProcess -> PID;
     USLOSS_ContextInit(&(initProcess->state), initProcess->stack, initProcess->stackSize, NULL, wrapper);
     currentPid++;
