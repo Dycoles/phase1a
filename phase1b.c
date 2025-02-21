@@ -161,7 +161,6 @@ int launchPhases() {
 
 void phase1_init(void) {
     int old_psr = disableInterrupts();
-    // result of spork operation
     // initialize all processes in process table
     for (int i = 0; i < MAXPROC; i++) {
         memset(process_table[i].name, 0, MAXNAME);
@@ -207,6 +206,7 @@ int spork(char *name, int (*startFunc)(void *), void *arg, int stackSize, int pr
         USLOSS_Console("ERROR: Someone attempted to call spork while in user mode!\n");
         USLOSS_Halt(1);
     }
+    // USLOSS_Console("Sporking\n");
     int old_psr = disableInterrupts();
 
     // if stack size smaller than USLOSS_MIN_STACK, return -2
@@ -264,12 +264,15 @@ int spork(char *name, int (*startFunc)(void *), void *arg, int stackSize, int pr
     // set parents and ensure there is space for children 
     thisProcess -> next_sibling = currentProcess->first_child;
     currentProcess->first_child = thisProcess;
-    enqueue(thisProcess);
     // Initialize context for process
     USLOSS_ContextInit(&(thisProcess->state), thisProcess->stack, thisProcess->stackSize, NULL, wrapper);
-    dispatcher();
+    enqueue(thisProcess);
+    if (priority < currentProcess -> priority) {
+        dispatcher();
+    }
     // return PID of the child process
     restoreInterrupts(old_psr);
+    // USLOSS_Console("Ending spork, returning PID\n");
     return thisProcess -> PID;
 }
 
@@ -409,9 +412,11 @@ void dispatcher() {
         USLOSS_Console("ERROR: Someone attempted to call spork while in user mode!\n");
         USLOSS_Halt(1);
     }
+    // USLOSS_Console("Starting Dispatcher\n");
     int old_psr = disableInterrupts();
     
     struct process *oldProcess = currentProcess;
+    int curTime = currentTime();
     enqueue(oldProcess);
     struct process *newProcess = dequeue();
     currentProcess = newProcess;
@@ -428,6 +433,7 @@ void dispatcher() {
         USLOSS_ContextSwitch(&oldProcess->state, &newProcess->state);
     }
     restoreInterrupts(old_psr);
+    // USLOSS_Console("Starting Dispatcher\n");
 }
 
 void zap(int pid) {
