@@ -183,6 +183,7 @@ void phase1_init(void) {
     currentPid = initProcess -> PID;
     USLOSS_ContextInit(&(initProcess->state), initProcess->stack, initProcess->stackSize, NULL, wrapper);
     //runQueue -> current = currentProcess;
+    enqueue(initProcess);
     currentPid++;
     USLOSS_Console("Init is initialized\n");
     restoreInterrupts(old_psr);
@@ -425,6 +426,7 @@ int unblockProc(int pid) {
     }
     // unblock the process
     process_table[pid % MAXPROC].status = 0;
+    enqueue(&process_table[pid % MAXPROC]);
     // call the dispatcher
     dispatcher();
     return 0;
