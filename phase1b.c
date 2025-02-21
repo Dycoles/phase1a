@@ -4,8 +4,6 @@
 #include <assert.h>
 #include <stdlib.h>
 
-// TODO run queues?
-
 /*struct runQueue {
     struct process *head;
 };*/
@@ -44,15 +42,44 @@ struct process process_table[MAXPROC];
 // current process (set to NULL)
 struct process *currentProcess = NULL;
 // run queue
-struct runQueue runQueues[6];
+struct process *runQueues[6];
 
 struct process *dequeue() {
     // Step through each queue, removing old processes, searching for the next one:
     for (int i = 1; i <= 6; i++) {
         // Search for the first valid process:
         while (runQueues[i] != NULL) {
-            if ()
+            if (runQueues[i]->status == 0) { // runnable
+                struct process *dequeued = runQueues[i];
+                runQueues[i] = runQueues[i]->next_in_queue;
+                return dequeued;
+            } else {
+                runQueues[i] = runQueues[i]->next_in_queue;
+            }
         }
+    }
+
+    // No enqueued unblocked processes. Shouldn't be able to get here, return NULL:
+    return NULL;
+}
+
+int enqueue(struct process *toEnqueue) {
+    // If process is invalid, return false:
+    if (toEnqueue->status > 0) {    // TODO add if it's quit?
+        return 0;
+    }
+
+    int priority = toEnqueue->priority;
+
+    if (runQueues[priority] == NULL) {
+        runQueues[priority] = toEnqueue;
+        return 1;
+    } else {
+        struct process *queueTail;
+        for (queueTail = runQueues[priority];
+            queueTail->next_in_queue != NULL; queueTail = queueTail->next_in_queue) {}
+        queueTail->next_in_queue = toEnqueue;
+        return 1;
     }
 }
 
@@ -155,7 +182,7 @@ void phase1_init(void) {
     initProcess -> startFunc = launchPhases;
     currentPid = initProcess -> PID;
     USLOSS_ContextInit(&(initProcess->state), initProcess->stack, initProcess->stackSize, NULL, wrapper);
-    runQueue -> current = currentProcess;
+    //runQueue -> current = currentProcess;
     currentPid++;
     restoreInterrupts(old_psr);
 }
@@ -322,19 +349,18 @@ void dispatcher() {
         USLOSS_Halt(1);
     }
     int old_psr = disableInterrupts();
-    struct process *newProcess = NULL;
-    // get highest priority process -> highest priority at front of queue
-    if (queue -> current != NULL) {
-        newProcess = queue->current;
-        // remove process from runqueue?
-    }
+
+    struct process *newProcess = dequeue();
+
     // Ensure the process exists
     if (newProcess == NULL) {
         USLOSS_Console("Error: Process %d not found!\n", newpid);
         USLOSS_Halt(1);
     }
     struct process *oldProcess = currentProcess;
+    enqueue(oldProcess);
     currentProcess = newProcess;
+
     if (oldProcess == NULL) {
         USLOSS_ContextSwitch(NULL, &newProcess->state);
     } else {
