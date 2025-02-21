@@ -236,6 +236,8 @@ int spork(char *name, int (*startFunc)(void *), void *arg, int stackSize, int pr
     thisProcess -> stack = malloc(stackSize);
     thisProcess -> in_use = 1;
     thisProcess -> status = 0;
+    thisProcess -> quit = 0;
+    thisProcess -> quitStatus = 0;
     thisProcess -> zapped = 0;
 
     // set arg
@@ -280,23 +282,33 @@ int join(int *status) {
 
     // Altered for loop makes it run slower, but helps match output exactly
     while (1) {
+        int hasChildren = 0;
         for (int i = currentPid; i >= 0; i--) {
             int slot = i % MAXPROC;
             // if child exists, return PID of the child
-            if (process_table[slot].parentPid == currentProcess->PID && process_table[slot].quit == 1 && process_table[slot].in_use == 1) {
-                *status = process_table[slot].quitStatus;
-                process_table[slot].in_use = 0;
-                //free(process_table[i].stack);
-                currentProcess->status = 0; //TODO maybe an issue if blocked before?
-                restoreInterrupts(old_psr);
-                return process_table[slot].PID;
+            if (process_table[slot].parentPid == currentProcess->PID && process_table[slot].in_use == 1) {
+                hasChildren = 1;
+                if (process_table[slot].quit == 1) {
+                    *status = process_table[slot].quitStatus;
+                    process_table[slot].in_use = 0;
+                    //free(process_table[i].stack);
+                    currentProcess->status = 0; //TODO maybe an issue if blocked before?
+                    restoreInterrupts(old_psr);
+                    return process_table[slot].PID;
+                }
             }
         }
+
+        if (!hasChildren) {
+            // return -2 if the process does not have any children
+            currentProcess->status = 0; //TODO maybe an issue if blocked before?
+            restoreInterrupts(old_psr);
+            return -2;
+        }
+
+        //USLOSS_Console("\t%s\n", process_table[2].first_child->name);
         dispatcher();
     }
-    // return -2 if the process does not have any children
-    restoreInterrupts(old_psr);
-    return -2;
 }
 
 void quit(int status) {
@@ -310,7 +322,8 @@ void quit(int status) {
     // If not all children are joined, give error:
     for (struct process *child = currentProcess->first_child; child != NULL; child = child->next_sibling) {
         if (child->in_use == 1) {
-            //USLOSS_Console("Child in use: %s\n", child->name);
+            //USLOSS_Console("Child in use: %s\n", child->first_child->name);
+            //dumpProcesses();
             USLOSS_Console("ERROR: Process pid %d called quit() while it still had children.\n", currentProcess->PID);
             USLOSS_Halt(1);
         }
