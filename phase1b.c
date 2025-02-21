@@ -34,6 +34,8 @@ struct process {
     struct process *first_child;
     struct process *parent;
     struct process *next_in_queue;
+    struct process *zapped_by;
+    struct process *next_to_zap;
     USLOSS_Context state;
 };
 
@@ -325,7 +327,7 @@ void quit(int status) {
     // If not all children are joined, give error:
     for (struct process *child = currentProcess->first_child; child != NULL; child = child->next_sibling) {
         if (child->in_use == 1) {
-            //USLOSS_Console("Child in use: %s\n", child->first_child->name);
+            //USLOSS_Console("Child in use: %s\n", child->name);
             //dumpProcesses();
             USLOSS_Console("ERROR: Process pid %d called quit() while it still had children.\n", currentProcess->PID);
             USLOSS_Halt(1);
@@ -339,6 +341,16 @@ void quit(int status) {
     if (currentProcess->parent->status == 2) {
         currentProcess->parent->status = 0; // TODO maybe an issue if blocked before?
         enqueue(currentProcess->parent);    // TODO probably shouldn't handle this way
+    }
+
+    currentProcess->zapped = 0;
+    struct process *zapper = currentProcess->zapped_by;
+    while (zapper != NULL) {
+        zapper->status = 0; //TODO maybe an issue
+        enqueue(zapper);
+        struct process *nextZapper = zapper->next_to_zap;
+        zapper->next_to_zap = NULL;
+        zapper = nextZapper;
     }
 
     //free(currentProcess->stack);
@@ -375,6 +387,11 @@ void dumpProcesses(void) {
                 printf("Terminated(%d)\n", process_table[i].quitStatus);
             } else if (process_table[i].status == 0) {
                 printf("Runnable\n");
+            } else if (process_table[i].status == 2) {
+                printf("Blocked(waiting for child to quit)\n");
+                //} else if (process_table[i].zapped) {
+            } else if (process_table[i].status == 3) {
+                printf("Blocked(waiting for zap target to quit)\n");
             } else {
                 printf("Blocked\n");
             }
@@ -435,14 +452,27 @@ void zap(int pid) {
 
     // process a (cur process) zaps b (int pid)
     process_table[pid % MAXPROC].zapped = 1;
+    if (process_table[pid % MAXPROC].zapped_by == NULL) {
+        process_table[pid % MAXPROC].zapped_by = currentProcess;
+    } else {
+        struct process *zapTail;
+        for (zapTail = process_table[pid % MAXPROC].zapped_by;
+            zapTail->next_to_zap != NULL; zapTail = zapTail->next_to_zap) {}
+        zapTail->next_to_zap = currentProcess;
+    }
     // add this process to zapper queue
 
     // -> CODE HERE
 
     // process a is blocked, b must complete before a can run (b is "zapped")
-    blockMe();
+    //blockMe();
+    currentProcess->status = 3;
     // -> the zapped process CANNOT block itself
     // once process b completes, a is unblocked and runs again
+    while (process_table[pid % MAXPROC].zapped) {
+        dispatcher();
+    }
+    currentProcess->status = 0; // TODO Maybe an issue
 }
 
 void blockMe() {
