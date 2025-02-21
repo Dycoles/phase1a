@@ -114,7 +114,7 @@ void wrapper(void) {
     // USLOSS_Console("Result is: %d\n", result);
     // USLOSS_Console("Wrapper complete, starting quit\n");
     // if function returns, call quit
-    quit_phase_1a(result, 1);
+    quit_phase_1a(result);
 }
 
 int testcaseWrapper(void *) {
@@ -149,7 +149,6 @@ int launchPhases() {
 void phase1_init(void) {
     int old_psr = disableInterrupts();
     // result of spork operation
-    int result;
     // initialize all processes in process table
     for (int i = 0; i < MAXPROC; i++) {
         memset(process_table[i].name, 0, MAXNAME);
@@ -281,7 +280,7 @@ int join(int *status) {
 void quit(int status) {
     //USLOSS_Console("quitting\n");
     if ((USLOSS_PsrGet() & USLOSS_PSR_CURRENT_MODE) == 0 ) {
-        USLOSS_Console("ERROR: Someone attempted to call quit_phase_1a while in user mode!\n");
+        USLOSS_Console("ERROR: Someone attempted to call quit while in user mode!\n");
         USLOSS_Halt(1);
     }
     int old_psr = disableInterrupts();
@@ -354,7 +353,7 @@ void dispatcher() {
 
     // Ensure the process exists
     if (newProcess == NULL) {
-        USLOSS_Console("Error: Process %d not found!\n", newpid);
+        USLOSS_Console("Error: Process not found!\n");
         USLOSS_Halt(1);
     }
     struct process *oldProcess = currentProcess;
