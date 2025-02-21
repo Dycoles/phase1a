@@ -6,13 +6,13 @@
 
 // TODO run queues?
 
-struct runQueue {
+/*struct runQueue {
     struct process *head;
-}
+};*/
 
 struct zapQueue {
     struct process *head;
-}
+};
 
 struct process {
     int PID;
@@ -34,6 +34,7 @@ struct process {
     int zapped;
     struct process *next_sibling;
     struct process *first_child;
+    struct process *next_in_queue;
     USLOSS_Context state;
 };
 
@@ -43,6 +44,18 @@ struct process process_table[MAXPROC];
 // current process (set to NULL)
 struct process *currentProcess = NULL;
 // run queue
+struct runQueue runQueues[6];
+
+struct process *dequeue() {
+    // Step through each queue, removing old processes, searching for the next one:
+    for (int i = 1; i <= 6; i++) {
+        // Search for the first valid process:
+        while (runQueues[i] != NULL) {
+            if ()
+        }
+    }
+}
+
 int disableInterrupts() {
     int old_psr = USLOSS_PsrGet();
     if (USLOSS_PsrSet(old_psr & ~USLOSS_PSR_CURRENT_INT) != 0) {
