@@ -251,6 +251,7 @@ int spork(char *name, int (*startFunc)(void *), void *arg, int stackSize, int pr
     // set parents and ensure there is space for children 
     thisProcess -> next_sibling = currentProcess->first_child;
     currentProcess->first_child = thisProcess;
+    enqueue(thisProcess);
     // Initialize context for process
     USLOSS_ContextInit(&(thisProcess->state), thisProcess->stack, thisProcess->stackSize, NULL, wrapper);
     // return PID of the child process
@@ -266,16 +267,19 @@ int join(int *status) {
         return -3;
     }
     // Altered for loop makes it run slower, but helps match output exactly
-    for (int i = currentPid; i >= 0; i--) {
-        int slot = i % MAXPROC;
-        // if child exists, return PID of the child
-        if (process_table[slot].parentPid == currentProcess->PID && process_table[slot].quit == 1 && process_table[slot].in_use == 1) {
-            *status = process_table[slot].quitStatus;
-            process_table[slot].in_use = 0;
-            //free(process_table[i].stack);
-            restoreInterrupts(old_psr);
-            return process_table[slot].PID;
+    while (1) {
+        for (int i = currentPid; i >= 0; i--) {
+            int slot = i % MAXPROC;
+            // if child exists, return PID of the child
+            if (process_table[slot].parentPid == currentProcess->PID && process_table[slot].quit == 1 && process_table[slot].in_use == 1) {
+                *status = process_table[slot].quitStatus;
+                process_table[slot].in_use = 0;
+                //free(process_table[i].stack);
+                restoreInterrupts(old_psr);
+                return process_table[slot].PID;
+            }
         }
+        dispatcher();
     }
     // return -2 if the process does not have any children
     restoreInterrupts(old_psr);
@@ -293,6 +297,7 @@ void quit(int status) {
     // If not all children are joined, give error:
     for (struct process *child = currentProcess->first_child; child != NULL; child = child->next_sibling) {
         if (child->in_use == 1) {
+            USLOSS_Console("%s\n", child->name);
             USLOSS_Console("ERROR: Process pid %d called quit() while it still had children.\n", currentProcess->PID);
             USLOSS_Halt(1);
         }
