@@ -393,7 +393,7 @@ void dumpProcesses(void) {
             } else if (process_table[i].status == 3) {
                 printf("Blocked(waiting for zap target to quit)\n");
             } else {
-                printf("Blocked\n");
+                printf("Blocked(%d)\n", 3);
             }
         }
     }
