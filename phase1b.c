@@ -32,6 +32,7 @@ struct process {
     int zapped;
     struct process *next_sibling;
     struct process *first_child;
+    struct process *parent;
     struct process *next_in_queue;
     USLOSS_Context state;
 };
@@ -49,7 +50,7 @@ struct process *dequeue() {
     for (int i = 1; i <= 6; i++) {
         // Search for the first valid process:
         while (runQueues[i] != NULL) {
-            if (runQueues[i]->status == 0) { // runnable
+            if (runQueues[i]->status == 0 && runQueues[i]->quit == 0) { // runnable
                 struct process *dequeued = runQueues[i];
                 runQueues[i] = runQueues[i]->next_in_queue;
                 return dequeued;
@@ -130,7 +131,7 @@ int testcaseWrapper(void *) {
 }
 
 int launchPhases() {
-    USLOSS_Console("Init phases launching\n");
+    //USLOSS_Console("Init phases launching\n");
     phase2_start_service_processes();
     phase3_start_service_processes();
     phase4_start_service_processes();
@@ -187,7 +188,7 @@ void phase1_init(void) {
     //runQueue -> current = currentProcess;
     enqueue(initProcess);
     currentPid++;
-    USLOSS_Console("Init is initialized\n");
+    //USLOSS_Console("Init is initialized\n");
     restoreInterrupts(old_psr);
 }
 
@@ -247,6 +248,7 @@ int spork(char *name, int (*startFunc)(void *), void *arg, int stackSize, int pr
     }
     currentPid++;
 
+    thisProcess -> parent = currentProcess;
     thisProcess -> parentPid = currentProcess -> PID;
     // set parents and ensure there is space for children 
     thisProcess -> next_sibling = currentProcess->first_child;
@@ -254,12 +256,16 @@ int spork(char *name, int (*startFunc)(void *), void *arg, int stackSize, int pr
     enqueue(thisProcess);
     // Initialize context for process
     USLOSS_ContextInit(&(thisProcess->state), thisProcess->stack, thisProcess->stackSize, NULL, wrapper);
+    dispatcher();
     // return PID of the child process
     restoreInterrupts(old_psr);
     return thisProcess -> PID;
 }
 
 int join(int *status) {
+    // Block the current process:
+    currentProcess->status = 2;
+
     int old_psr = disableInterrupts();
     // if argument is invalid, return -3
     if (status == NULL) {
@@ -275,6 +281,7 @@ int join(int *status) {
                 *status = process_table[slot].quitStatus;
                 process_table[slot].in_use = 0;
                 //free(process_table[i].stack);
+                currentProcess->status = 0; //TODO maybe an issue if blocked before?
                 restoreInterrupts(old_psr);
                 return process_table[slot].PID;
             }
@@ -297,16 +304,20 @@ void quit(int status) {
     // If not all children are joined, give error:
     for (struct process *child = currentProcess->first_child; child != NULL; child = child->next_sibling) {
         if (child->in_use == 1) {
-            USLOSS_Console("%s\n", child->name);
+            //USLOSS_Console("Child in use: %s\n", child->name);
             USLOSS_Console("ERROR: Process pid %d called quit() while it still had children.\n", currentProcess->PID);
             USLOSS_Halt(1);
         }
     }
 
     //USLOSS_Console("Halting process quit\n");
-    // Halt the current process:
+    // Halt the current process (and wake the parent if joining):
     currentProcess->quit = 1;
     currentProcess->quitStatus = status;
+    if (currentProcess->parent->status == 2) {
+        currentProcess->parent->status = 0; // TODO maybe an issue if blocked before?
+        enqueue(currentProcess->parent);    // TODO probably shouldn't handle this way
+    }
 
     //free(currentProcess->stack);
     //currentProcess->in_use = 0;
@@ -351,7 +362,7 @@ void dumpProcesses(void) {
 }
 
 void dispatcher() {
-    USLOSS_Console("Dispatcher called, switching process\n");
+    //USLOSS_Console("Dispatcher called, switching process\n");
     // context switch to the highest priority process and run it
     // highest priority is lowest number
     
@@ -371,7 +382,7 @@ void dispatcher() {
         USLOSS_Console("Error: Process not found!\n");
         USLOSS_Halt(1);
     }
-    
+
     if (oldProcess == NULL) {
         USLOSS_ContextSwitch(NULL, &newProcess->state);
     } else {
@@ -382,21 +393,21 @@ void dispatcher() {
 
 void zap(int pid) {
     if (pid == 1) {
-        USLOSS_Console("Cannot zap init\n");
+        USLOSS_Console("ERROR: Attempt to zap() init.\n");
         USLOSS_Halt(1);
     }
     if (pid == currentProcess -> PID) {
-        USLOSS_Console("Cannot zap current process\n");
+        USLOSS_Console("ERROR: Attempt to zap() itself.\n");
         USLOSS_Halt(1);
     }
     // if pid that we zap process_table[i].quit == 1, error then halt
     if (process_table[pid % MAXPROC].quit == 1) {
-        USLOSS_Console("Process has already been terminated\n");
+        USLOSS_Console("ERROR: Attempt to zap() a process that is already in the process of dying.\n");
         USLOSS_Halt(1);
     }
     // if pid that we zap not in process table, error then halt
     if (process_table[pid % MAXPROC].PID == 0) {
-        USLOSS_Console("Process for pid does not exist\n");
+        USLOSS_Console("ERROR: Attempt to zap() a non-existent process.\n");
         USLOSS_Halt(1);
     }
 
