@@ -451,7 +451,7 @@ void zap(int pid) {
         USLOSS_Halt(1);
     }
     // if pid that we zap not in process table, error then halt
-    if (process_table[pid % MAXPROC].PID == 0) {
+    if (process_table[pid % MAXPROC].PID != pid) {
         USLOSS_Console("ERROR: Attempt to zap() a non-existent process.\n");
         USLOSS_Halt(1);
     }
