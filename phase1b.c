@@ -53,6 +53,7 @@ struct process *dequeue() {
             if (runQueues[i]->status == 0 && runQueues[i]->quit == 0) { // runnable
                 struct process *dequeued = runQueues[i];
                 runQueues[i] = runQueues[i]->next_in_queue;
+                dequeued->next_in_queue = NULL;
                 return dequeued;
             } else {
                 runQueues[i] = runQueues[i]->next_in_queue;
@@ -79,8 +80,10 @@ int enqueue(struct process *toEnqueue) {
         return 1;
     } else {
         struct process *queueTail;
-        for (queueTail = runQueues[priority];
-            queueTail->next_in_queue != NULL; queueTail = queueTail->next_in_queue) {}
+        
+        for (queueTail = runQueues[priority]; queueTail->next_in_queue != NULL; queueTail = queueTail->next_in_queue) {
+
+        }
         queueTail->next_in_queue = toEnqueue;
         return 1;
     }
