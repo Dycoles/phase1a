@@ -356,16 +356,16 @@ void dispatcher() {
     }
     int old_psr = disableInterrupts();
     
+    struct process *oldProcess = currentProcess;
+    enqueue(oldProcess);
     struct process *newProcess = dequeue();
+    currentProcess = newProcess;
 
     // Ensure the process exists
     if (newProcess == NULL) {
         USLOSS_Console("Error: Process not found!\n");
         USLOSS_Halt(1);
     }
-    struct process *oldProcess = currentProcess;
-    enqueue(oldProcess);
-    currentProcess = newProcess;
     
     if (oldProcess == NULL) {
         USLOSS_ContextSwitch(NULL, &newProcess->state);
