@@ -114,7 +114,7 @@ void wrapper(void) {
     // USLOSS_Console("Result is: %d\n", result);
     // USLOSS_Console("Wrapper complete, starting quit\n");
     // if function returns, call quit
-    quit_phase_1a(result);
+    quit(result);
 }
 
 int testcaseWrapper(void *) {
@@ -128,6 +128,7 @@ int testcaseWrapper(void *) {
 }
 
 int launchPhases() {
+    USLOSS_Console("Init phases launching\n");
     phase2_start_service_processes();
     phase3_start_service_processes();
     phase4_start_service_processes();
@@ -183,6 +184,7 @@ void phase1_init(void) {
     USLOSS_ContextInit(&(initProcess->state), initProcess->stack, initProcess->stackSize, NULL, wrapper);
     //runQueue -> current = currentProcess;
     currentPid++;
+    USLOSS_Console("Init is initialized\n");
     restoreInterrupts(old_psr);
 }
 
@@ -341,6 +343,7 @@ void dumpProcesses(void) {
 }
 
 void dispatcher() {
+    USLOSS_Console("Dispatcher called, switching process\n");
     // context switch to the highest priority process and run it
     // highest priority is lowest number
     if ((USLOSS_PsrGet() & USLOSS_PSR_CURRENT_MODE) == 0 ) {
@@ -383,7 +386,7 @@ void zap(int pid) {
         USLOSS_Halt(1);
     }
     // if pid that we zap not in process table, error then halt
-    if (process_table[pid % MAXPROC] == NULL) {
+    if (process_table[pid % MAXPROC].PID == 0) {
         USLOSS_Console("Process for pid does not exist\n");
         USLOSS_Halt(1);
     }
@@ -412,7 +415,7 @@ void blockMe() {
 
 int unblockProc(int pid) {
     // if the process was not blocked or does not exist, return -2;
-    if (process_table[pid % MAXPROC] == NULL) {
+    if (process_table[pid % MAXPROC].PID == 0) {
         USLOSS_Console("The process does not exist\n");
         return -2;
     }
