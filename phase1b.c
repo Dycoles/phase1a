@@ -121,12 +121,16 @@ void wrapper(void) {
 }
 
 int testcaseWrapper(void *) {
-    // USLOSS_Console("Test case wrapper started\n");
-    if (testcase_main() == 0){
-        USLOSS_Console("Phase 1A TEMPORARY HACK: testcase_main() returned, simulation will now halt.\n");
+    // Call testcase_main() and halt once it returns:
+    int retVal = testcase_main();
+    if (retVal == 0) {   // terminated normally
+        //USLOSS_Console("Phase 1A TEMPORARY HACK: testcase_main() returned, simulation will now halt.\n");
         USLOSS_Halt(0);
+    } else {    // errors
+        USLOSS_Console("Some error was detected by the testcase.\n");
+        USLOSS_Halt(retVal);
     }
-    // USLOSS_Console("Test case wrapper returned 1\n");
+    // Should never get here, just making the compiler happy:
     return 1;
 }
 
@@ -263,15 +267,17 @@ int spork(char *name, int (*startFunc)(void *), void *arg, int stackSize, int pr
 }
 
 int join(int *status) {
-    // Block the current process:
-    currentProcess->status = 2;
-
     int old_psr = disableInterrupts();
+
     // if argument is invalid, return -3
     if (status == NULL) {
         restoreInterrupts(old_psr);
         return -3;
     }
+
+    // Block the current process:
+    currentProcess->status = 2;
+
     // Altered for loop makes it run slower, but helps match output exactly
     while (1) {
         for (int i = currentPid; i >= 0; i--) {
