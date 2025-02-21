@@ -64,13 +64,15 @@ struct process *dequeue() {
 }
 
 int enqueue(struct process *toEnqueue) {
+    if (toEnqueue == NULL) {
+        return 0;
+    }
     // If process is invalid, return false:
     if (toEnqueue->status > 0) {    // TODO add if it's quit?
         return 0;
     }
-
+    
     int priority = toEnqueue->priority;
-
     if (runQueues[priority] == NULL) {
         runQueues[priority] = toEnqueue;
         return 1;
@@ -347,12 +349,13 @@ void dispatcher() {
     USLOSS_Console("Dispatcher called, switching process\n");
     // context switch to the highest priority process and run it
     // highest priority is lowest number
+    
     if ((USLOSS_PsrGet() & USLOSS_PSR_CURRENT_MODE) == 0 ) {
         USLOSS_Console("ERROR: Someone attempted to call spork while in user mode!\n");
         USLOSS_Halt(1);
     }
     int old_psr = disableInterrupts();
-
+    
     struct process *newProcess = dequeue();
 
     // Ensure the process exists
@@ -363,7 +366,7 @@ void dispatcher() {
     struct process *oldProcess = currentProcess;
     enqueue(oldProcess);
     currentProcess = newProcess;
-
+    
     if (oldProcess == NULL) {
         USLOSS_ContextSwitch(NULL, &newProcess->state);
     } else {
