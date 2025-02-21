@@ -458,14 +458,16 @@ void zap(int pid) {
 
     // process a (cur process) zaps b (int pid)
     process_table[pid % MAXPROC].zapped = 1;
-    if (process_table[pid % MAXPROC].zapped_by == NULL) {
+    currentProcess->next_to_zap = process_table[pid % MAXPROC].zapped_by;
+    process_table[pid % MAXPROC].zapped_by = currentProcess;
+    /*if (process_table[pid % MAXPROC].zapped_by == NULL) {
         process_table[pid % MAXPROC].zapped_by = currentProcess;
     } else {
         struct process *zapTail;
         for (zapTail = process_table[pid % MAXPROC].zapped_by;
             zapTail->next_to_zap != NULL; zapTail = zapTail->next_to_zap) {}
         zapTail->next_to_zap = currentProcess;
-    }
+    }*/
     // add this process to zapper queue
 
     // -> CODE HERE
