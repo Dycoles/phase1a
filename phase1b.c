@@ -1,12 +1,17 @@
+/*
+phase 1b.c 
+University of Arizona
+CSC 452
+02/21/2025
+Authors: 
+    Dylan Coles
+    Jack Williams
+*/
 #include <stdio.h>
 #include "phase1.h"
 #include <string.h>
 #include <assert.h>
 #include <stdlib.h>
-
-/*struct runQueue {
-    struct process *head;
-};*/
 
 struct zapQueue {
     struct process *head;
@@ -72,7 +77,7 @@ int enqueue(struct process *toEnqueue) {
         return 0;
     }
     // If process is invalid, return false:
-    if (toEnqueue->status > 0) {    // TODO add if it's quit?
+    if (toEnqueue->status > 0) {
         return 0;
     }
     
@@ -92,7 +97,9 @@ int enqueue(struct process *toEnqueue) {
 }
 
 int disableInterrupts() {
+    // store psr for later
     int old_psr = USLOSS_PsrGet();
+    // ensure we are in kernel mode
     if (USLOSS_PsrSet(old_psr & ~USLOSS_PSR_CURRENT_INT) != 0) {
         USLOSS_Console("ERROR: cannot disable interrupts in user mode\n");
         USLOSS_Halt(1);
@@ -101,13 +108,16 @@ int disableInterrupts() {
 }
 
 void enableInterrupts() {
+    // ensure we are in kernel mode
     if ((USLOSS_PsrGet() & USLOSS_PSR_CURRENT_MODE) == 0) {
         USLOSS_Console("ERROR: cannot enable interrupts in user mode\n");
     }
-    USLOSS_PsrSet(USLOSS_PsrGet() | USLOSS_PSR_CURRENT_INT);
+    // restore interrupts; x used to keep compiler happy
+    int x = USLOSS_PsrSet(USLOSS_PsrGet() | USLOSS_PSR_CURRENT_INT); x++;
 }
 
 void restoreInterrupts(int old_psr) {
+    // restore interrupts; x used to keep compiler happy
     int x = USLOSS_PsrSet(old_psr); x++;
 }
 
@@ -129,7 +139,6 @@ int testcaseWrapper(void *) {
     // Call testcase_main() and halt once it returns:
     int retVal = testcase_main();
     if (retVal == 0) {   // terminated normally
-        //USLOSS_Console("Phase 1A TEMPORARY HACK: testcase_main() returned, simulation will now halt.\n");
         USLOSS_Halt(0);
     } else {    // errors
         USLOSS_Console("Some error was detected by the testcase.\n");
@@ -153,8 +162,6 @@ int launchPhases() {
         USLOSS_Halt(1);
     }
     // USLOSS_Console("The result is %d\n", result);
-    // USLOSS_Console("Phase 1A TEMPORARY HACK: init() manually switching to testcase_main() after using spork() to create it.\n");
-    // TEMP_switchTo(result);
     dispatcher();
     return 255;
 }
@@ -284,11 +291,9 @@ int join(int *status) {
         restoreInterrupts(old_psr);
         return -3;
     }
-
     // Block the current process:
     currentProcess->status = 2;
-
-    // Altered for loop makes it run slower, but helps match output exactly
+    // Altered loop makes it run slower, but helps match output exactly
     while (1) {
         int hasChildren = 0;
         for (int i = currentPid; i >= 0; i--) {
@@ -298,9 +303,13 @@ int join(int *status) {
                 hasChildren = 1;
                 if (process_table[slot].quit == 1) {
                     *status = process_table[slot].quitStatus;
+                    // free the stack
+                    if (process_table[slot].stack != NULL) {
+                        free(process_table[slot].stack);
+                        process_table[slot].stack = NULL;
+                    }
                     process_table[slot].in_use = 0;
-                    //free(process_table[i].stack);
-                    currentProcess->status = 0; //TODO maybe an issue if blocked before?
+                    currentProcess->status = 0;
                     restoreInterrupts(old_psr);
                     return process_table[slot].PID;
                 }
@@ -309,7 +318,7 @@ int join(int *status) {
 
         if (!hasChildren) {
             // return -2 if the process does not have any children
-            currentProcess->status = 0; //TODO maybe an issue if blocked before?
+            currentProcess->status = 0;
             restoreInterrupts(old_psr);
             return -2;
         }
@@ -331,7 +340,6 @@ void quit(int status) {
     for (struct process *child = currentProcess->first_child; child != NULL; child = child->next_sibling) {
         if (child->in_use == 1) {
             //USLOSS_Console("Child in use: %s\n", child->name);
-            //dumpProcesses();
             USLOSS_Console("ERROR: Process pid %d called quit() while it still had children.\n", currentProcess->PID);
             USLOSS_Halt(1);
         }
@@ -342,8 +350,8 @@ void quit(int status) {
     currentProcess->quit = 1;
     currentProcess->quitStatus = status;
     if (currentProcess->parent->status == 2) {
-        currentProcess->parent->status = 0; // TODO maybe an issue if blocked before?
-        enqueue(currentProcess->parent);    // TODO probably shouldn't handle this way
+        currentProcess->parent->status = 0;
+        enqueue(currentProcess->parent);
     }
 
     currentProcess->zapped = 0;
@@ -355,13 +363,7 @@ void quit(int status) {
         zapper->next_to_zap = NULL;
         zapper = nextZapper;
     }
-
-    //free(currentProcess->stack);
-    //currentProcess->in_use = 0;
-
     // Switch to the next process:
-    //USLOSS_Console("Temp switch quit\n");
-    // TEMP_switchTo(switchToPid);
     dispatcher();
     //USLOSS_Console("Restore interrupts quit\n");
     restoreInterrupts(old_psr);
@@ -375,8 +377,6 @@ int getpid(void) {
 
 void dumpProcesses(void) {
     int old_psr = disableInterrupts();
-    // prints debug info about process table -> should be easiest function, just need to access USLOSS console and print info
-    //printf("**************** Calling dumpProcesses() *******************\n");
     printf("PID  PPID  NAME              PRIORITY  STATE\n");
     for (int i = 0; i < MAXPROC; i++) {
         if (process_table[i].in_use) {
@@ -405,9 +405,7 @@ void dumpProcesses(void) {
 
 void dispatcher() {
     //USLOSS_Console("Dispatcher called, switching process\n");
-    // context switch to the highest priority process and run it
-    // highest priority is lowest number
-    
+    // context switch to the highest priority process and run it    
     if ((USLOSS_PsrGet() & USLOSS_PSR_CURRENT_MODE) == 0 ) {
         USLOSS_Console("ERROR: Someone attempted to call spork while in user mode!\n");
         USLOSS_Halt(1);
@@ -416,7 +414,7 @@ void dispatcher() {
     int old_psr = disableInterrupts();
     
     struct process *oldProcess = currentProcess;
-    int curTime = currentTime();
+    // int curTime = currentTime();
     enqueue(oldProcess);
     struct process *newProcess = dequeue();
     currentProcess = newProcess;
@@ -433,7 +431,7 @@ void dispatcher() {
         USLOSS_ContextSwitch(&oldProcess->state, &newProcess->state);
     }
     restoreInterrupts(old_psr);
-    // USLOSS_Console("Starting Dispatcher\n");
+    // USLOSS_Console("Ending Dispatcher\n");
 }
 
 void zap(int pid) {
@@ -460,27 +458,15 @@ void zap(int pid) {
     process_table[pid % MAXPROC].zapped = 1;
     currentProcess->next_to_zap = process_table[pid % MAXPROC].zapped_by;
     process_table[pid % MAXPROC].zapped_by = currentProcess;
-    /*if (process_table[pid % MAXPROC].zapped_by == NULL) {
-        process_table[pid % MAXPROC].zapped_by = currentProcess;
-    } else {
-        struct process *zapTail;
-        for (zapTail = process_table[pid % MAXPROC].zapped_by;
-            zapTail->next_to_zap != NULL; zapTail = zapTail->next_to_zap) {}
-        zapTail->next_to_zap = currentProcess;
-    }*/
-    // add this process to zapper queue
-
-    // -> CODE HERE
 
     // process a is blocked, b must complete before a can run (b is "zapped")
-    //blockMe();
     currentProcess->status = 3;
     // -> the zapped process CANNOT block itself
     // once process b completes, a is unblocked and runs again
     while (process_table[pid % MAXPROC].zapped) {
         dispatcher();
     }
-    currentProcess->status = 0; // TODO Maybe an issue
+    currentProcess->status = 0;
 }
 
 void blockMe() {
