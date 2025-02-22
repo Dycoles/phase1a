@@ -180,6 +180,11 @@ int launchPhases() {
 }
 
 void phase1_init(void) {
+    if ((USLOSS_PsrGet() & USLOSS_PSR_CURRENT_MODE) == 0) {
+        USLOSS_Console("ERROR: Someone attempted to call phase1_init while in user mode!\n");
+        USLOSS_Halt(1);
+    }
+    
     int old_psr = disableInterrupts();
 
     // initialize all processes in process table
@@ -303,6 +308,11 @@ int spork(char *name, int (*startFunc)(void *), void *arg, int stackSize, int pr
 }
 
 int join(int *status) {
+    if ((USLOSS_PsrGet() & USLOSS_PSR_CURRENT_MODE) == 0) {
+        USLOSS_Console("ERROR: Someone attempted to call join while in user mode!\n");
+        USLOSS_Halt(1);
+    }
+    
     int old_psr = disableInterrupts();
 
     // if argument is invalid, return -3
@@ -398,11 +408,21 @@ void quit(int status) {
 }
 
 int getpid(void) {
+    if ((USLOSS_PsrGet() & USLOSS_PSR_CURRENT_MODE) == 0) {
+        USLOSS_Console("ERROR: Someone attempted to call getPID while in user mode!\n");
+        USLOSS_Halt(1);
+    }
+    
     // returns the PID of cur process
     return currentProcess->PID;
 }
 
 void dumpProcesses(void) {
+    if ((USLOSS_PsrGet() & USLOSS_PSR_CURRENT_MODE) == 0) {
+        USLOSS_Console("ERROR: Someone attempted to call dumpProcesses while in user mode!\n");
+        USLOSS_Halt(1);
+    }
+    
     int old_psr = disableInterrupts();
 
     // Print information about each living process:
@@ -433,9 +453,9 @@ void dumpProcesses(void) {
     restoreInterrupts(old_psr);
 }
 
-void dispatcher() {  
+void dispatcher() {
     if ((USLOSS_PsrGet() & USLOSS_PSR_CURRENT_MODE) == 0 ) {
-        USLOSS_Console("ERROR: Someone attempted to call spork while in user mode!\n");
+        USLOSS_Console("ERROR: Someone attempted to call the dispatcher while in user mode!\n");
         USLOSS_Halt(1);
     }
     int old_psr = disableInterrupts();
@@ -463,6 +483,11 @@ void dispatcher() {
 }
 
 void zap(int pid) {
+    if ((USLOSS_PsrGet() & USLOSS_PSR_CURRENT_MODE) == 0) {
+        USLOSS_Console("ERROR: Someone attempted to call zap while in user mode!\n");
+        USLOSS_Halt(1);
+    }
+    
     struct process *toZap = &process_table[pid % MAXPROC];
 
     // Can't zap init:
@@ -502,6 +527,11 @@ void zap(int pid) {
 }
 
 void blockMe() {
+    if ((USLOSS_PsrGet() & USLOSS_PSR_CURRENT_MODE) == 0) {
+        USLOSS_Console("ERROR: Someone attempted to call blockMe while in user mode!\n");
+        USLOSS_Halt(1);
+    }
+    
     if (currentProcess -> zapped == 1) {
         quit(currentProcess -> status);
     }
@@ -514,6 +544,11 @@ void blockMe() {
 }
 
 int unblockProc(int pid) {
+    if ((USLOSS_PsrGet() & USLOSS_PSR_CURRENT_MODE) == 0) {
+        USLOSS_Console("ERROR: Someone attempted to call unblockProc while in user mode!\n");
+        USLOSS_Halt(1);
+    }
+    
     // If the process was not blocked or does not exist, return -2:
     if (process_table[pid % MAXPROC].PID == 0) {
         USLOSS_Console("The process does not exist\n");
