@@ -1,1 +1,122 @@
+// temp variables to prevent errors
+
+#include <phase1.h>
+#include <phase2.h>
+#include <string.h>
+#include <assert.h>
+#include <stdlib.h>
+#include <stdio.h>
+
+
+// struct queue {
+//     // tbd
+// };
+
+struct mailBox {
+    int mailBoxId;
+    int numSlots;
+    int slotSize;
+    int status;
+};
+
+struct mailSlot {
+    int mailBoxID;
+    int messageSize;
+    char message[MAX_MESSAGE];
+    int status;
+};
+
+struct shadowTable {
+    int pid;
+    int state;
+};
+
+// create mailbox array
+static struct mailBox mail_box[MAXMBOX];
+// create mailslot array
+static struct mailSlot mail_slot[MAXSLOTS];
+// create shadow process table
+static struct shadowTable process_table[MAXPROC];
+// create array of function pointers
+void (*systemCallVec[])(USLOSS_Sysargs *args);
+
+// define nullsys
+static void nullsys() {
+    printf("Error: Invalid syscall\n");
+    USLOSS_Halt(1);
+}
+
+void phase2_init(void) {
+    // set all of the elements of systemCallVec[] to nullsys
+    for (int i = 0; i < MAXSYSCALLS; i++) {
+        systemCallVec[i] = nullsys;
+    }
+    // set all elements of mail_box null or zero
+    for (int i = 0; i < MAXMBOX; i++) {
+        mail_box[i].mailBoxId = 0;
+        mail_box[i].numSlots = 0;
+        mail_box[i].slotSize = 0;
+        mail_box[i].status = 0;
+    }
+    // set all elements of mail_slot null or zero
+    for (int i = 0; i < MAXSLOTS; i++) {
+        mail_slot[i].mailBoxID = 0;
+        mail_slot[i].messageSize = 0;
+        mail_slot[i].status = 0;
+    }
+    // set all elements of process_table to null or zero
+    for (int i = 0; i < MAXPROC; i++) {
+        process_table[i].pid = 0;
+        process_table[i].state = 0;
+    }
+}
+
+void phase2_start_service_processes(void) {
+    
+}
+
+int MboxCreate(int numSlots, int slotSize) {
+    if (numSlots < 0 || slotSize < 0 || numSlots > MAXSLOTS || slotSize > MAX_MESSAGE) {
+        return -1;
+    }
+    // create a mailbox and return its ID. ID can be the index into the array of mailboxes, for example
+    return 0;
+}
+
+int MboxRelease(int mailboxID) {
+    // if ID is not used on a mailbox that is currently in use
+    // return -1;
+    // destroy mailbox and free all slots consumbed by the mailbox
+    return 0;
+}
+
+int MboxSend(int mailboxID, void *message, int messageSize) {
+    return send(mailboxID, message, messageSize, 0);
+
+}
+
+int MboxRecv(int mailboxID, void *message, int maxMessageSize) {
+    return receive(mailboxID, message, maxMessageSize, 0);
+}
+
+// conditional send and recieve, change condition parameter to 1 to indicate what the helper should do
+int MboxCondSend(int mailboxID, void *message, int messageSize) {
+    return send(mailboxID, message, messageSize, 1);
+}
+
+int MboxCondRecv(int mailboxID, void *message, int maxMessageSize) {
+    return receive(mailboxID, message, maxMessageSize, 1);
+}
+
+static int send(int mailboxID, void *message, int messageSize, int condition) {
+    return 0;
+}
+
+static int receive(int mailboxID, void *message, int maxMessageSize, int condition) {
+    return 0;
+}
+
+void waitDevice(int type, int unity, int *status) {
+
+}
 
