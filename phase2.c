@@ -248,6 +248,7 @@ int MboxRelease(int mailboxID) {
         }
         thisBox -> slotSize--;
     }
+    // unblock producers and consumers
     while (thisBox->blockedConsumers->size>0) {
         struct shadowTable *consumer = dequeue(thisBox->blockedConsumers);
         if (consumer != NULL) {
@@ -295,16 +296,19 @@ static int send(int mailboxID, void *message, int messageSize, int condition) {
         USLOSS_Console("Invalid argument for send, return -1\n");
         return -1;
     }
-    // check to see if the system has run out of global mailbox slots
-    if (0) {
+    // create a slot then check if we have run out of slots
+    if (thisBox->slots->size == thisBox->slotsUsed) {
+        // the system has run out of global mailbox slots, message cannot be queued
         return -2;
     }
-
-    // handle send logic here
-    // check to see if the mailbox was released before the send could happen
-    if (0) {
-        return -1;
-    }
+    // check if there are consumers waiting in the consumer queue
+    // if yes, deliver message directly to the first consumer in the queue, wake it up, and remove it from the queue
+    // if no consumers are waiting, check if there's space in the mailbox's slots
+        // if there is space, queue the message in a mail slot
+        // if no space, add sender to producer queue and block it
+    // for waking up producers, only wake up one producer at a time when a slot becomes available
+    // the producer that was first in the queue should be woken first
+    // have the producer write its message to the newly available slot
     enableInterrupts();
     return 0;
 }
