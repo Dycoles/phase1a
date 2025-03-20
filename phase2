@@ -7,6 +7,8 @@
 #include <stdlib.h>
 #include <stdio.h>
 
+// TEMP VALUE TO ELIMINATE ERRORS; COMMENT OUT LATER
+USLOSS_PSR_CURRENT_MODE = 0;
 
 // struct queue {
 //     // tbd
@@ -40,6 +42,8 @@ static struct shadowTable process_table[MAXPROC];
 // create array of function pointers
 void (*systemCallVec[])(USLOSS_Sysargs *args);
 
+int mBoxUsed = 0;
+
 // define nullsys
 static void nullsys() {
     printf("Error: Invalid syscall\n");
@@ -48,6 +52,7 @@ static void nullsys() {
 
 void phase2_init(void) {
     // set all of the elements of systemCallVec[] to nullsys
+    disableInterrupts();
     for (int i = 0; i < MAXSYSCALLS; i++) {
         systemCallVec[i] = nullsys;
     }
@@ -69,30 +74,144 @@ void phase2_init(void) {
         process_table[i].pid = 0;
         process_table[i].state = 0;
     }
+
+    // handle init logic here
+    enableInterrupts();
 }
 
 void phase2_start_service_processes(void) {
-    
+    // handle startr service processes here
 }
 
 int MboxCreate(int numSlots, int slotSize) {
-    if (numSlots < 0 || slotSize < 0 || numSlots > MAXSLOTS || slotSize > MAX_MESSAGE) {
+    if ((USLOSS_PsrGet() & USLOSS_PSR_CURRENT_MODE) == 0) {
+        USLOSS_Console("ERROR: Someone attempted to call MboxCreate while in user mode!\n");
+        USLOSS_Halt(1);
+    }
+    disableInterrupts();
+    if (numSlots < 0 || slotSize < 0 || numSlots > MAXSLOTS || slotSize > MAX_MESSAGE || mBoxUsed >= MAXMBOX) {
+        USLOSS_Console("Invalid argument or no mailboxes available; cannot create mailbox\n");
         return -1;
     }
-    // create a mailbox and return its ID. ID can be the index into the array of mailboxes, for example
-    return 0;
+    // get a mailbox -> 0 is a temp value, will need to calculate index
+    struct mailBox *thisBox = &mail_box[0];
+
+    // initialize fields
+    thisBox->mailBoxId = 0;
+    thisBox->numSlots = numSlots;
+    thisBox->slotSize = slotSize;
+    // status = 1 (active)
+    thisBox->status = 1;
+
+    // increment index for used mailboxes
+    mBoxUsed++;
+    USLOSS_Console("Mailbox created\n");
+
+    enableInterrupts();
+    // return mailbox id
+    return thisBox->mailBoxId;
 }
 
 int MboxRelease(int mailboxID) {
-    // if ID is not used on a mailbox that is currently in use
-    // return -1;
-    // destroy mailbox and free all slots consumbed by the mailbox
+    if ((USLOSS_PsrGet() & USLOSS_PSR_CURRENT_MODE) == 0) {
+        USLOSS_Console("ERROR: Someone attempted to call MboxRelease() while in user mode!\n");
+        USLOSS_Halt(1);
+    }
+    disableInterrupts();
+    // if mailbox id is invalid, return -1 and print an error 
+    if (mailboxID < 0 || mailboxID >= MAXMBOX) {
+        USLOSS_Console("Invalid mailbox ID\n");
+        return -1;
+    }
+    // get mailbox
+    struct mailBox *thisBox = &mail_box[mailboxID];
+    // if ID is not used on a mailbox that is currently in use return -1
+    if (thisBox == NULL || thisBox -> status == 0) {
+        USLOSS_Console("Cannot release invalid or inactive mailbox\n");
+        return -1;
+    }
+    // Free all slots consumed by the mailbox
+    while (thisBox->slotSize > 0) {
+        // empty consumed slots here
+        thisBox -> slotSize--;
+    }
+
+    // unblock producers and consumers
+
+    // release the mailbox
+
+    enableInterrupts();
+    // return 0, success
+    USLOSS_Console("Mailbox release complete\n");
     return 0;
+}
+
+static int send(int mailboxID, void *message, int messageSize, int condition) {
+    if ((USLOSS_PsrGet() & USLOSS_PSR_CURRENT_MODE) == 0) {
+        USLOSS_Console("ERROR: Someone attempted to call send() while in user mode!\n");
+        USLOSS_Halt(1);
+    }
+    disableInterrupts();
+    // check for invalid id
+    if (mailboxID < 0 || mailboxID >= MAXMBOX) {
+        USLOSS_Console("Invalid mailbox ID for send, return -1\n");
+        enableInterrupts();
+        return -1;
+    }
+    // get mailbox
+    struct mailBox *thisBox = &mail_box[mailboxID];
+
+    // check for invalid arguments
+    if (thisBox->status == 0 || thisBox -> slotSize < messageSize || messageSize < 0) {
+        USLOSS_Console("Invalid argument for send, return -1\n");
+        return -1;
+    }
+    // check to see if the system has run out of global mailbox slots
+    if (0) {
+        return -2;
+    }
+
+    // handle send logic here
+    // check to see if the mailbox was released before the send could happen
+    if (0) {
+        return -1;
+    }
+    enableInterrupts();
+    return 0;
+}
+
+static int receive(int mailboxID, void *message, int maxMessageSize, int condition) {
+    if ((USLOSS_PsrGet() & USLOSS_PSR_CURRENT_MODE) == 0) {
+        USLOSS_Console("ERROR: Someone attempted to call recieve() while in user mode!\n");
+        USLOSS_Halt(1);
+    }
+    disableInterrupts();
+    // check for invalid id
+    if (mailboxID < 0 || mailboxID >= MAXMBOX) {
+        USLOSS_Console("Invalid mailbox ID for send, return -1\n");
+        enableInterrupts();
+        return -1;
+    }
+    // get mailbox
+    struct mailBox *thisBox = &mail_box[mailboxID];
+
+    // check for invalid arguments
+    if (thisBox->status == 0) {
+        USLOSS_Console("Invalid argument for recieve, return -1\n");
+        return -1;
+    }
+    int messageRecievedSize = 0;
+    // handle recieve logic here
+    // check to see if the mailbox was released before the receive could happen
+    if (0) {
+        return -1;
+    }
+    enableInterrupts();
+    return messageRecievedSize;
 }
 
 int MboxSend(int mailboxID, void *message, int messageSize) {
     return send(mailboxID, message, messageSize, 0);
-
 }
 
 int MboxRecv(int mailboxID, void *message, int maxMessageSize) {
@@ -108,15 +227,11 @@ int MboxCondRecv(int mailboxID, void *message, int maxMessageSize) {
     return receive(mailboxID, message, maxMessageSize, 1);
 }
 
-static int send(int mailboxID, void *message, int messageSize, int condition) {
-    return 0;
-}
-
-static int receive(int mailboxID, void *message, int maxMessageSize, int condition) {
-    return 0;
-}
-
 void waitDevice(int type, int unity, int *status) {
-
+    if ((USLOSS_PsrGet() & USLOSS_PSR_CURRENT_MODE) == 0) {
+        USLOSS_Console("ERROR: Someone attempted to call waitDevice() while in user mode!\n");
+        USLOSS_Halt(1);
+    }
+    disableInterrupts();
+    enableInterrupts();
 }
-
