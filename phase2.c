@@ -1,15 +1,15 @@
 // temp variables to prevent errors
 
-#include "phase1.h"
-#include "phase2.h"
+#include <phase1.h>
+#include <phase2.h>
 #include <string.h>
 #include <assert.h>
 #include <stdlib.h>
 #include <stdio.h>
 
 // TEMP VALUES TO ELIMINATE ERRORS; COMMENT OUT LATER
-//USLOSS_PSR_CURRENT_MODE = 0;
-//USLOSS_PSR_CURRENT_INT = 0;
+USLOSS_PSR_CURRENT_MODE = 0;
+USLOSS_PSR_CURRENT_INT = 0;
 
 struct queue {
     void *head;
@@ -112,6 +112,8 @@ static struct mailSlot mail_slot[MAXSLOTS];
 static struct shadowTable process_table[MAXPROC];
 // create array of function pointers
 void (*systemCallVec[MAXSYSCALLS])(USLOSS_Sysargs *args);
+// create device array
+int device[7];
 
 // constants
 int mBoxUsed = 0;
@@ -121,6 +123,22 @@ int curMailBoxId;
 static void nullsys() {
     printf("Error: Invalid syscall\n");
     USLOSS_Halt(1);
+}
+
+static void clock_handler() {
+
+}
+
+static void disk_handler() {
+
+}
+
+static void syscall_handler() {
+
+}
+
+static void term_handler() {
+
 }
 
 int disableInterrupts() {
@@ -146,9 +164,13 @@ void enableInterrupts() {
     int x = USLOSS_PsrSet(USLOSS_PsrGet() | USLOSS_PSR_CURRENT_INT); x++;
 }
 
+void restoreInterrupts(int old_psr) {
+    int x = USLOSS_PsrSet(old_psr); x++;
+}
+
 void phase2_init(void) {
     // set all of the elements of systemCallVec[] to nullsys
-    disableInterrupts();
+    int old_psr = disableInterrupts();
     for (int i = 0; i < MAXSYSCALLS; i++) {
         systemCallVec[i] = nullsys;
     }
@@ -171,14 +193,39 @@ void phase2_init(void) {
         process_table[i].pid = 0;
         process_table[i].status = 0;
     }
+    for (int i = 0; i < 7; i++) {
+        int result = MboxCreate(0, sizeof(int));
+        device[i] = result;
+    }
+    // functions for terminals
+    // USLOSS_DeviceInput(TERM_DEV, unit, &status)
+    // USLOSS_DeviceOutput(USLOSS_TERM_DEV, unit, control)
+    // functions for disks
+    // USLOSS_DeviceInput(USLOSS_DISK_DEV, unit, &status)
+    // USLOSS_Device_output(USLOSS_DISK_DEV, unit, request)
+    USLOSS_IntVec[USLOSS_CLOCK_INT] = clock_handler;
+    USLOSS_IntVec[USLOSS_DISK_INT] = disk_handler;
+    USLOSS_IntVec[USLOSS_TERM_INT] = term_handler;
+    USLOSS_IntVec[USLOSS_SYSCALL_INT] = syscall_handler;
 
     // handle init logic here
-    //enableInterrupts();
+    restoreInterrupts(old_psr);
 }
 
 void phase2_start_service_processes(void) {
-    // handle startr service processes here
-}
+    // handle start service processes here
+    int status;
+    int result = spork("testcase_main", (*testcaseWrapper), NULL, USLOSS_MIN_STACK, 3);
+    if (result < 0) {
+        // print errors here then halt
+        USLOSS_Console("Errors in spork returned < 0\n");
+        USLOSS_Halt(1);
+    }
+    if (join(&status) != result) {
+        USOLSS_Console("Join failed phase2_start_service_processes\n");
+        USLOSS_Halt(1);
+    }
+ }
 
 int MboxCreate(int numSlots, int slotSize) {
     if ((USLOSS_PsrGet() & USLOSS_PSR_CURRENT_MODE) == 0) {
