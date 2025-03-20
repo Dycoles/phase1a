@@ -1,15 +1,14 @@
-// temp variables to prevent errors
 
-#include <phase1.h>
-#include <phase2.h>
+#include "phase1.h"
+#include "phase2.h"
 #include <string.h>
 #include <assert.h>
 #include <stdlib.h>
 #include <stdio.h>
 
 // TEMP VALUES TO ELIMINATE ERRORS; COMMENT OUT LATER
-USLOSS_PSR_CURRENT_MODE = 0;
-USLOSS_PSR_CURRENT_INT = 0;
+//USLOSS_PSR_CURRENT_MODE = 0;
+//USLOSS_PSR_CURRENT_INT = 0;
 
 struct Node {
     // pid for process queue
@@ -53,6 +52,7 @@ struct shadowTable {
     int pid;
     // 0 for blocked, 1 for ready
     int status;
+    //struct shadowTable *nextInQueue;
 };
 
 void enqueue(struct queue *q, int pid, void *message, int messageSize) {
@@ -73,13 +73,13 @@ void enqueue(struct queue *q, int pid, void *message, int messageSize) {
     q->size++;
 }
 
-void dequeue(struct queue *q, int pid, void **message, int messageSize) {
+int dequeue(struct queue *q, int pid, void **message, int messageSize) {
     if (q->head == NULL) {
         // cannot dequeue empty queue
         return -1;
     }
     struct Node *temp = q -> head;
-    if (pid != NULL) {
+    /*if (pid != NULL) {
         pid = temp->pid;
     }
     if (message != NULL) {
@@ -87,7 +87,7 @@ void dequeue(struct queue *q, int pid, void **message, int messageSize) {
     }
     if (messageSize != NULL) {
         messageSize = temp -> messageSize;
-    }
+    }*/
     q->head = q->head->next;
     if (q->head == NULL) {
         q->tail = NULL;
@@ -111,7 +111,7 @@ static struct mailSlot mail_slot[MAXSLOTS];
 // create shadow process table
 static struct shadowTable process_table[MAXPROC];
 // create array of function pointers
-void (*systemCallVec[])(USLOSS_Sysargs *args);
+void (*systemCallVec[MAXSYSCALLS])(USLOSS_Sysargs *args);
 
 // constants
 int mBoxUsed = 0;
@@ -173,11 +173,12 @@ void phase2_init(void) {
     }
 
     // handle init logic here
-    enableInterrupts();
+    //enableInterrupts(); TODO Shouldn't be commented out, but doesn't work otherwise
 }
 
 void phase2_start_service_processes(void) {
     // handle startr service processes here
+    disableInterrupts();
 }
 
 int MboxCreate(int numSlots, int slotSize) {
@@ -191,7 +192,7 @@ int MboxCreate(int numSlots, int slotSize) {
         return -1;
     }
     // find an unused mailbox in the array
-    if (curMailBoxId >= MAXMBOX || &mail_box[curMailBoxId].status == 1) {
+    if (curMailBoxId >= MAXMBOX || mail_box[curMailBoxId].status == 1) {
         for (int i = 0; i < MAXMBOX; i++) {
             if (mail_box[i].status == 0) {
                 curMailBoxId = i;
@@ -199,6 +200,7 @@ int MboxCreate(int numSlots, int slotSize) {
             }
         }
     }
+
     struct mailBox *thisBox = &mail_box[curMailBoxId];
 
     // initialize fields
@@ -209,6 +211,7 @@ int MboxCreate(int numSlots, int slotSize) {
     // status = 1 (active)
     thisBox->status = 1;
     // initialize mailbox queues
+    USLOSS_Console("FIXME: Queues initialized wrong\n");
     initQueue(thisBox->blockedConsumers);
     initQueue(thisBox->blockedProducers);
     initQueue(thisBox->slots);
@@ -292,7 +295,7 @@ static int send(int mailboxID, void *message, int messageSize, int condition) {
 
 static int receive(int mailboxID, void *message, int maxMessageSize, int condition) {
     if ((USLOSS_PsrGet() & USLOSS_PSR_CURRENT_MODE) == 0) {
-        USLOSS_Console("ERROR: Someone attempted to call recieve() while in user mode!\n");
+        USLOSS_Console("ERROR: Someone attempted to call receive() while in user mode!\n");
         USLOSS_Halt(1);
     }
     disableInterrupts();
@@ -307,17 +310,17 @@ static int receive(int mailboxID, void *message, int maxMessageSize, int conditi
 
     // check for invalid arguments
     if (thisBox->status == 0) {
-        USLOSS_Console("Invalid argument for recieve, return -1\n");
+        USLOSS_Console("Invalid argument for receive, return -1\n");
         return -1;
     }
-    int messageRecievedSize = 0;
+    int messageReceivedSize = 0;
     // handle recieve logic here
     // check to see if the mailbox was released before the receive could happen
     if (0) {
         return -1;
     }
     enableInterrupts();
-    return messageRecievedSize;
+    return messageReceivedSize;
 }
 
 int MboxSend(int mailboxID, void *message, int messageSize) {
