@@ -1,14 +1,14 @@
 // temp variables to prevent errors
 
-#include <phase1.h>
-#include <phase2.h>
+#include "phase1.h"
+#include "phase2.h"
 #include <string.h>
 #include <assert.h>
 #include <stdlib.h>
 #include <stdio.h>
 
 // TEMP VALUE TO ELIMINATE ERRORS; COMMENT OUT LATER
-USLOSS_PSR_CURRENT_MODE = 0;
+//USLOSS_PSR_CURRENT_MODE = 0;
 
 // struct queue {
 //     // tbd
@@ -40,7 +40,7 @@ static struct mailSlot mail_slot[MAXSLOTS];
 // create shadow process table
 static struct shadowTable process_table[MAXPROC];
 // create array of function pointers
-void (*systemCallVec[])(USLOSS_Sysargs *args);
+void (*systemCallVec[MAXSYSCALLS])(USLOSS_Sysargs *args);
 
 int mBoxUsed = 0;
 
@@ -48,6 +48,29 @@ int mBoxUsed = 0;
 static void nullsys() {
     printf("Error: Invalid syscall\n");
     USLOSS_Halt(1);
+}
+
+int disableInterrupts() {
+    // store psr for later
+    int old_psr = USLOSS_PsrGet();
+
+    // ensure we are in kernel mode
+    if (USLOSS_PsrSet(old_psr & ~USLOSS_PSR_CURRENT_INT) != 0) {
+        USLOSS_Console("ERROR: cannot disable interrupts in user mode\n");
+        USLOSS_Halt(1);
+    }
+
+    return old_psr;
+}
+
+void enableInterrupts() {
+    // ensure we are in kernel mode
+    if ((USLOSS_PsrGet() & USLOSS_PSR_CURRENT_MODE) == 0) {
+        USLOSS_Console("ERROR: cannot enable interrupts in user mode\n");
+    }
+
+    // restore interrupts; x used to keep compiler happy
+    int x = USLOSS_PsrSet(USLOSS_PsrGet() | USLOSS_PSR_CURRENT_INT); x++;
 }
 
 void phase2_init(void) {
