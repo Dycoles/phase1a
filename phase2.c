@@ -1,37 +1,108 @@
 // temp variables to prevent errors
 
-#include "phase1.h"
-#include "phase2.h"
+#include <phase1.h>
+#include <phase2.h>
 #include <string.h>
 #include <assert.h>
 #include <stdlib.h>
 #include <stdio.h>
 
-// TEMP VALUE TO ELIMINATE ERRORS; COMMENT OUT LATER
-//USLOSS_PSR_CURRENT_MODE = 0;
+// TEMP VALUES TO ELIMINATE ERRORS; COMMENT OUT LATER
+USLOSS_PSR_CURRENT_MODE = 0;
+USLOSS_PSR_CURRENT_INT = 0;
 
-// struct queue {
-//     // tbd
-// };
+struct Node {
+    // pid for process queue
+    int pid;
+    // message pointer and message size for slot queue
+    void *message;
+    int messageSize;
+    struct Node *next;
+};
+
+struct queue {
+    struct Node *head;
+    struct Node *tail;
+    int size;
+};
 
 struct mailBox {
     int mailBoxId;
     int numSlots;
     int slotSize;
+    int slotsUsed;
+    // 0 for inactive, 1 for active
     int status;
+    // queue for messages to be delivered
+    struct queue *slots;
+    // queue for producers that are waiting for a alot
+    struct queue *blockedProducers;
+    // queue for consumers waiting for a message
+    struct queue *blockedConsumers;
 };
 
 struct mailSlot {
     int mailBoxID;
     int messageSize;
     char message[MAX_MESSAGE];
+    // 0 for inactive, 1 for active
     int status;
 };
 
 struct shadowTable {
     int pid;
-    int state;
+    // 0 for blocked, 1 for ready
+    int status;
 };
+
+void enqueue(struct queue *q, int pid, void *message, int messageSize) {
+    struct Node *node = malloc(sizeof(struct Node));
+    // initialize fields for queue
+    node->pid = pid;
+    node->message = message;
+    node->messageSize = messageSize;
+    node->next = NULL;
+
+    if (q->tail == NULL) {
+        q->head = node;
+        q->tail = node;
+    } else {
+        q->tail->next = node;
+        q->tail = node;
+    }
+    q->size++;
+}
+
+void dequeue(struct queue *q, int pid, void **message, int messageSize) {
+    if (q->head == NULL) {
+        // cannot dequeue empty queue
+        return -1;
+    }
+    struct Node *temp = q -> head;
+    if (pid != NULL) {
+        pid = temp->pid;
+    }
+    if (message != NULL) {
+        message = temp -> message;
+    }
+    if (messageSize != NULL) {
+        messageSize = temp -> messageSize;
+    }
+    q->head = q->head->next;
+    if (q->head == NULL) {
+        q->tail = NULL;
+    }
+    // free dequeued element
+    free(temp);
+    q->size--;
+    return 0;
+}
+
+void initQueue(struct queue *q) {
+    q->head = NULL;
+    q->tail = NULL;
+    q->size = 0;
+}
 
 // create mailbox array
 static struct mailBox mail_box[MAXMBOX];
@@ -40,9 +111,11 @@ static struct mailSlot mail_slot[MAXSLOTS];
 // create shadow process table
 static struct shadowTable process_table[MAXPROC];
 // create array of function pointers
-void (*systemCallVec[MAXSYSCALLS])(USLOSS_Sysargs *args);
+void (*systemCallVec[])(USLOSS_Sysargs *args);
 
+// constants
 int mBoxUsed = 0;
+int curMailBoxId;
 
 // define nullsys
 static void nullsys() {
@@ -84,6 +157,7 @@ void phase2_init(void) {
         mail_box[i].mailBoxId = 0;
         mail_box[i].numSlots = 0;
         mail_box[i].slotSize = 0;
+        mail_box[i].slotsUsed = 0;
         mail_box[i].status = 0;
     }
     // set all elements of mail_slot null or zero
@@ -95,7 +169,7 @@ void phase2_init(void) {
     // set all elements of process_table to null or zero
     for (int i = 0; i < MAXPROC; i++) {
         process_table[i].pid = 0;
-        process_table[i].state = 0;
+        process_table[i].status = 0;
     }
 
     // handle init logic here
@@ -116,18 +190,31 @@ int MboxCreate(int numSlots, int slotSize) {
         USLOSS_Console("Invalid argument or no mailboxes available; cannot create mailbox\n");
         return -1;
     }
-    // get a mailbox -> 0 is a temp value, will need to calculate index
-    struct mailBox *thisBox = &mail_box[0];
+    // find an unused mailbox in the array
+    if (curMailBoxId >= MAXMBOX || &mail_box[curMailBoxId].status == 1) {
+        for (int i = 0; i < MAXMBOX; i++) {
+            if (mail_box[i].status == 0) {
+                curMailBoxId = i;
+                break;
+            }
+        }
+    }
+    struct mailBox *thisBox = &mail_box[curMailBoxId];
 
     // initialize fields
-    thisBox->mailBoxId = 0;
+    thisBox->mailBoxId = curMailBoxId;
     thisBox->numSlots = numSlots;
+    thisBox->slotsUsed = 0;
     thisBox->slotSize = slotSize;
     // status = 1 (active)
     thisBox->status = 1;
-
-    // increment index for used mailboxes
+    // initialize mailbox queues
+    initQueue(thisBox->blockedConsumers);
+    initQueue(thisBox->blockedProducers);
+    initQueue(thisBox->slots);
+    // increment index for used mailboxes and current mailbox index
     mBoxUsed++;
+    curMailBoxId++;
     USLOSS_Console("Mailbox created\n");
 
     enableInterrupts();
