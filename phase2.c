@@ -1,28 +1,22 @@
+// temp variables to prevent errors
 
-#include "phase1.h"
-#include "phase2.h"
+#include <phase1.h>
+#include <phase2.h>
 #include <string.h>
 #include <assert.h>
 #include <stdlib.h>
 #include <stdio.h>
 
 // TEMP VALUES TO ELIMINATE ERRORS; COMMENT OUT LATER
-//USLOSS_PSR_CURRENT_MODE = 0;
-//USLOSS_PSR_CURRENT_INT = 0;
-
-struct Node {
-    // pid for process queue
-    int pid;
-    // message pointer and message size for slot queue
-    void *message;
-    int messageSize;
-    struct Node *next;
-};
+USLOSS_PSR_CURRENT_MODE = 0;
+USLOSS_PSR_CURRENT_INT = 0;
 
 struct queue {
-    struct Node *head;
-    struct Node *tail;
+    void *head;
+    void *tail;
     int size;
+    // 0 for process queue, 1 for slot queue
+    int queueType;
 };
 
 struct mailBox {
@@ -46,62 +40,66 @@ struct mailSlot {
     char message[MAX_MESSAGE];
     // 0 for inactive, 1 for active
     int status;
+    struct mailSlot *nextSlot;
 };
 
 struct shadowTable {
+    // pid for processes
     int pid;
     // 0 for blocked, 1 for ready
     int status;
-    //struct shadowTable *nextInQueue;
+    // message and message size for slots
+    int messageSize;
+    void *message;
+    struct mailSlot *slotPointer;
+    struct shadowTable *processPointer;
 };
 
-void enqueue(struct queue *q, int pid, void *message, int messageSize) {
-    struct Node *node = malloc(sizeof(struct Node));
-    // initialize fields for queue
-    node->pid = pid;
-    node->message = message;
-    node->messageSize = messageSize;
-    node->next = NULL;
-
-    if (q->tail == NULL) {
-        q->head = node;
-        q->tail = node;
+void enqueue(struct queue *q, void *process) {
+    if (q->head == NULL && q->tail == NULL) {
+        q->head = process;
+        q->tail = process;
     } else {
-        q->tail->next = node;
-        q->tail = node;
+        // check if processqueue
+        if (q->queueType == 0) {
+            // check if slot queue
+            ((struct shadowTable *)(q->tail))->processPointer = process;
+        } else if (q->queueType == 1) {
+            ((struct mailSlot *)(q->tail))->nextSlot = process;
+        }
+        q->tail = process;
     }
     q->size++;
 }
 
-int dequeue(struct queue *q, int pid, void **message, int messageSize) {
+void *dequeue(struct queue *q) {
+   void *temp = q -> head;
     if (q->head == NULL) {
         // cannot dequeue empty queue
-        return -1;
+        return NULL;
     }
-    struct Node *temp = q -> head;
-    /*if (pid != NULL) {
-        pid = temp->pid;
-    }
-    if (message != NULL) {
-        message = temp -> message;
-    }
-    if (messageSize != NULL) {
-        messageSize = temp -> messageSize;
-    }*/
-    q->head = q->head->next;
-    if (q->head == NULL) {
+    if (q->head == q->tail) {
+        q->head = NULL;
         q->tail = NULL;
-    }
-    // free dequeued element
-    free(temp);
+    } else {
+        if (q->queueType == 0) {
+            // increment using process pointer
+            q->head = ((struct shadowTable *)(q->head))->processPointer;
+        } else if (q->queueType == 1) {
+            q->head = ((struct mailSlot *)q->head)->nextSlot;
+        }
+        
+    } 
+    // return dequeued element
     q->size--;
-    return 0;
+    return temp;
 }
 
-void initQueue(struct queue *q) {
+void initQueue(struct queue *q, int type) {
     q->head = NULL;
     q->tail = NULL;
     q->size = 0;
+    q->queueType = type;
 }
 
 // create mailbox array
@@ -173,12 +171,11 @@ void phase2_init(void) {
     }
 
     // handle init logic here
-    //enableInterrupts(); TODO Shouldn't be commented out, but doesn't work otherwise
+    enableInterrupts();
 }
 
 void phase2_start_service_processes(void) {
     // handle startr service processes here
-    disableInterrupts();
 }
 
 int MboxCreate(int numSlots, int slotSize) {
@@ -200,7 +197,6 @@ int MboxCreate(int numSlots, int slotSize) {
             }
         }
     }
-
     struct mailBox *thisBox = &mail_box[curMailBoxId];
 
     // initialize fields
@@ -211,10 +207,9 @@ int MboxCreate(int numSlots, int slotSize) {
     // status = 1 (active)
     thisBox->status = 1;
     // initialize mailbox queues
-    USLOSS_Console("FIXME: Queues initialized wrong\n");
-    initQueue(thisBox->blockedConsumers);
-    initQueue(thisBox->blockedProducers);
-    initQueue(thisBox->slots);
+    initQueue(thisBox->blockedConsumers, 0);
+    initQueue(thisBox->blockedProducers, 0);
+    initQueue(thisBox->slots, 1);
     // increment index for used mailboxes and current mailbox index
     mBoxUsed++;
     curMailBoxId++;
@@ -246,12 +241,33 @@ int MboxRelease(int mailboxID) {
     // Free all slots consumed by the mailbox
     while (thisBox->slotSize > 0) {
         // empty consumed slots here
+        struct mailSlot *slot = dequeue(thisBox->slots);
+        if (slot != NULL) {
+            slot->mailBoxID = -1;
+            slot->status = 0;
+        }
         thisBox -> slotSize--;
     }
-
-    // unblock producers and consumers
-
+    while (thisBox->blockedConsumers->size>0) {
+        struct shadowTable *consumer = dequeue(thisBox->blockedConsumers);
+        if (consumer != NULL) {
+            unblockProc(consumer->pid);
+        }
+    }
+    while (thisBox->blockedProducers->size>0) {
+        struct shadowTable *producer = dequeue(thisBox->blockedProducers);
+        if (producer != NULL) {
+            unblockProc(producer->pid);
+        }
+    }
     // release the mailbox
+    thisBox->mailBoxId = -1;
+    thisBox->numSlots = 0;
+    thisBox->slotSize = 0;
+    thisBox->slotsUsed = 0;
+    thisBox->status = 0;
+    mBoxUsed--;
+    // unblock producers and consumers
 
     enableInterrupts();
     // return 0, success
@@ -314,7 +330,7 @@ static int receive(int mailboxID, void *message, int maxMessageSize, int conditi
         return -1;
     }
     int messageReceivedSize = 0;
-    // handle recieve logic here
+    // handle receive logic here
     // check to see if the mailbox was released before the receive could happen
     if (0) {
         return -1;
@@ -331,7 +347,7 @@ int MboxRecv(int mailboxID, void *message, int maxMessageSize) {
     return receive(mailboxID, message, maxMessageSize, 0);
 }
 
-// conditional send and recieve, change condition parameter to 1 to indicate what the helper should do
+// conditional send and receive, change condition parameter to 1 to indicate what the helper should do
 int MboxCondSend(int mailboxID, void *message, int messageSize) {
     return send(mailboxID, message, messageSize, 1);
 }
