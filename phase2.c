@@ -8,16 +8,16 @@
 #include <stdio.h>
 
 // TEMP VALUES TO ELIMINATE ERRORS; COMMENT OUT LATER
-USLOSS_PSR_CURRENT_MODE = 0;
-USLOSS_PSR_CURRENT_INT = 0;
+//USLOSS_PSR_CURRENT_MODE = 0;
+//USLOSS_PSR_CURRENT_INT = 0;
 
-struct queue {
+/*struct queue {
     void *head;
     void *tail;
     int size;
     // 0 for process queue, 1 for slot queue
     int queueType;
-};
+};*/
 
 struct mailBox {
     int mailBoxId;
@@ -27,11 +27,11 @@ struct mailBox {
     // 0 for inactive, 1 for active
     int status;
     // queue for messages to be delivered
-    struct queue *slots;
+    struct mailSlot *slots;
     // queue for producers that are waiting for a alot
-    struct queue *blockedProducers;
+    struct shadowTable *blockedProducers;
     // queue for consumers waiting for a message
-    struct queue *blockedConsumers;
+    struct shadowTable *blockedConsumers;
 };
 
 struct mailSlot {
@@ -53,9 +53,58 @@ struct shadowTable {
     void *message;
     struct mailSlot *slotPointer;
     struct shadowTable *processPointer;
+    struct shadowTable *nextInQueue;    // TODO may need nexts for producers and consumers
 };
 
-void enqueue(struct queue *q, void *process) {
+struct shadowTable *enqueueProcess(struct shadowTable *q, struct shadowTable *process) {
+    process->nextInQueue = q;
+    return process;
+}
+
+struct shadowTable *dequeueProcess(struct shadowTable *q) {
+    if (q == NULL) {
+        return NULL;
+    } else if (q->nextInQueue == NULL) {
+        return q;
+    } else if (q->nextInQueue->nextInQueue == NULL) {
+        struct shadowTable *dequeued = q->nextInQueue;
+        q->nextInQueue = NULL;
+        return dequeued;
+    } else {
+        return dequeueProcess(q->nextInQueue);
+    }
+ }
+
+ struct mailSlot *enqueueSlot(struct mailSlot *q, struct mailSlot *slot) {
+    slot->nextSlot = q;
+    return slot;
+}
+
+struct mailSlot *dequeueSlot(struct mailSlot *q) {
+    if (q == NULL) {
+        return NULL;
+    } else if (q->nextSlot == NULL) {
+        return q;
+    } else if (q->nextSlot->nextSlot == NULL) {
+        struct mailSlot *dequeued = q->nextSlot;
+        q->nextSlot = NULL;
+        return dequeued;
+    } else {
+        return dequeueSlot(q->nextSlot);
+    }
+ }
+
+ int outOfSlots(struct mailSlot *q, int slotsUsed) {
+    if (q == NULL) {
+        return 0;
+    } else if (slotsUsed == 0) {
+        return 1;
+    } else {
+        return outOfSlots(q->nextSlot, slotsUsed-1);
+    }
+ }
+
+/*void enqueue(struct queue *q, void *process) {
     if (q->head == NULL && q->tail == NULL) {
         q->head = process;
         q->tail = process;
@@ -71,7 +120,6 @@ void enqueue(struct queue *q, void *process) {
     }
     q->size++;
 }
-
 void *dequeue(struct queue *q) {
    void *temp = q -> head;
     if (q->head == NULL) {
@@ -93,16 +141,16 @@ void *dequeue(struct queue *q) {
     // return dequeued element
     q->size--;
     return temp;
-}
+}*/
 
-void initQueue(struct queue *q, int type) {
+/*void initQueue(struct queue *q, int type) {
     USLOSS_Console("Top of initqueue\n");
     q->head = NULL;
     q->tail = NULL;
     q->size = 0;
     q->queueType = type;
     USLOSS_Console("Bottom of initqueue\n");
-}
+}*/
 
 // create mailbox array
 static struct mailBox mail_box[MAXMBOX];
@@ -168,6 +216,20 @@ void restoreInterrupts(int old_psr) {
     int x = USLOSS_PsrSet(old_psr); x++;
 }
 
+int testcaseWrapper(void *) {
+    // Call testcase_main() and halt once it returns:
+    int retVal = testcase_main();
+    if (retVal == 0) {   // terminated normally
+        USLOSS_Halt(0);
+    } else {    // errors
+        USLOSS_Console("Some error was detected by the testcase.\n");
+        USLOSS_Halt(retVal);
+    }
+
+    // Should never get here, just making the compiler happy:
+    return 1;
+}
+
 void phase2_init(void) {
     // set all of the elements of systemCallVec[] to nullsys
     int old_psr = disableInterrupts();
@@ -181,6 +243,9 @@ void phase2_init(void) {
         mail_box[i].slotSize = 0;
         mail_box[i].slotsUsed = 0;
         mail_box[i].status = 0;
+        mail_box[i].slots = NULL;
+        mail_box[i].blockedProducers = NULL;
+        mail_box[i].blockedConsumers = NULL;
     }
     // set all elements of mail_slot null or zero
     for (int i = 0; i < MAXSLOTS; i++) {
@@ -214,7 +279,7 @@ void phase2_init(void) {
 
 void phase2_start_service_processes(void) {
     // handle start service processes here
-    int status;
+    /*int status;
     int result = spork("testcase_main", (*testcaseWrapper), NULL, USLOSS_MIN_STACK, 3);
     if (result < 0) {
         // print errors here then halt
@@ -222,9 +287,9 @@ void phase2_start_service_processes(void) {
         USLOSS_Halt(1);
     }
     if (join(&status) != result) {
-        USOLSS_Console("Join failed phase2_start_service_processes\n");
+        USLOSS_Console("Join failed phase2_start_service_processes\n");
         USLOSS_Halt(1);
-    }
+    }*/
  }
 
 int MboxCreate(int numSlots, int slotSize) {
@@ -234,7 +299,7 @@ int MboxCreate(int numSlots, int slotSize) {
     }
     disableInterrupts();
     if (numSlots < 0 || slotSize < 0 || numSlots > MAXSLOTS || slotSize > MAX_MESSAGE || mBoxUsed >= MAXMBOX) {
-        USLOSS_Console("Invalid argument or no mailboxes available; cannot create mailbox\n");
+        //USLOSS_Console("Invalid argument or no mailboxes available; cannot create mailbox\n");
         return -1;
     }
     // find an unused mailbox in the array
@@ -256,15 +321,15 @@ int MboxCreate(int numSlots, int slotSize) {
     // status = 1 (active)
     thisBox->status = 1;
     // initialize mailbox queues
-    initQueue(thisBox->blockedConsumers, 0);
-    initQueue(thisBox->blockedProducers, 0);
-    initQueue(thisBox->slots, 1);
+    thisBox->blockedConsumers = NULL;
+    thisBox->blockedProducers = NULL;
+    thisBox->slots = NULL;
     // increment index for used mailboxes and current mailbox index
     mBoxUsed++;
     curMailBoxId++;
-    USLOSS_Console("Mailbox created\n");
+    //USLOSS_Console("Mailbox created\n");
 
-    enableInterrupts();
+    //enableInterrupts();
     // return mailbox id
     return thisBox->mailBoxId;
 }
@@ -288,9 +353,13 @@ int MboxRelease(int mailboxID) {
         return -1;
     }
     // Free all slots consumed by the mailbox
-    while (thisBox->slotSize > 0) {
+    while (thisBox->slots != NULL) {
         // empty consumed slots here
-        struct mailSlot *slot = dequeue(thisBox->slots);
+        struct mailSlot *slot = dequeueSlot(thisBox->slots);
+        if (slot == thisBox->slots) {
+            thisBox->slots = NULL;
+        }
+
         if (slot != NULL) {
             slot->mailBoxID = -1;
             slot->status = 0;
@@ -298,14 +367,22 @@ int MboxRelease(int mailboxID) {
         thisBox -> slotSize--;
     }
     // unblock producers and consumers
-    while (thisBox->blockedConsumers->size>0) {
-        struct shadowTable *consumer = dequeue(thisBox->blockedConsumers);
+    while (thisBox->blockedConsumers != NULL) {
+        struct shadowTable *consumer = dequeueProcess(thisBox->blockedConsumers);
+        if (consumer == thisBox->blockedConsumers) {
+            thisBox->blockedConsumers = NULL;
+        }
+
         if (consumer != NULL) {
             unblockProc(consumer->pid);
         }
     }
-    while (thisBox->blockedProducers->size>0) {
-        struct shadowTable *producer = dequeue(thisBox->blockedProducers);
+    while (thisBox->blockedProducers != NULL) {
+        struct shadowTable *producer = dequeueProcess(thisBox->blockedProducers);
+        if (producer == thisBox->blockedProducers) {
+            thisBox->blockedProducers = NULL;
+        }
+        
         if (producer != NULL) {
             unblockProc(producer->pid);
         }
@@ -346,7 +423,7 @@ static int send(int mailboxID, void *message, int messageSize, int condition) {
         return -1;
     }
     // create a slot then check if we have run out of slots
-    if (thisBox->slots->size == thisBox->slotsUsed) {
+    if (outOfSlots(thisBox->slots, thisBox->slotsUsed)) {
         // the system has run out of global mailbox slots, message cannot be queued
         return -2;
     }
