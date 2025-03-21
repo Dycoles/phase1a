@@ -478,11 +478,30 @@ static int receive(int mailboxID, void *message, int maxMessageSize, int conditi
         return -1;
     }
     int messageReceivedSize = 0;
-    // handle receive logic here
-    // check to see if the mailbox was released before the receive could happen
-    if (0) {
+
+    // If mailbox was released, return error:
+    if (thisBox->status == 0) {
         return -1;
     }
+
+    // Receive message:
+    while (thisBox->slots == NULL) {
+        if (condition == 1) {   // conditional send
+            enableInterrupts();
+            return -2;
+        } else {
+            enqueueProcess(thisBox->blockedConsumers, NULL);    // FIXME unsure which consumer to add
+            blockMe();
+        }
+    }
+
+    // A message is now available, so receive it:
+    struct mailSlot *slot = dequeueSlot(thisBox->slots);
+    if (slot == thisBox->slots) {
+        thisBox->slots = NULL;
+    }
+    // TODO finish receive
+    
     enableInterrupts();
     return messageReceivedSize;
 }
