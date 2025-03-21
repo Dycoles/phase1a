@@ -8,9 +8,9 @@
 #include <stdio.h>
 
 // TEMP VALUES TO ELIMINATE ERRORS; COMMENT OUT LATER
-//USLOSS_PSR_CURRENT_MODE = 0;
-//USLOSS_PSR_CURRENT_INT = 0;
-//USLOSS_MIN_STACK = 0;
+USLOSS_PSR_CURRENT_MODE = 0;
+USLOSS_PSR_CURRENT_INT = 0;
+USLOSS_MIN_STACK = 0;
 
 /*struct queue {
     void *head;
@@ -121,12 +121,6 @@ int mBoxUsed = 0;
 int curMailBoxId;
 int totalTime = 0;
 
-// define nullsys
-static void nullsys() {
-    printf("Error: Invalid syscall\n");
-    USLOSS_Halt(1);
-}
-
 int disableInterrupts() {
     // store psr for later
     int old_psr = USLOSS_PsrGet();
@@ -150,6 +144,16 @@ void enableInterrupts() {
     int x = USLOSS_PsrSet(USLOSS_PsrGet() | USLOSS_PSR_CURRENT_INT); x++;
 }
 
+void restoreInterrupts(int old_psr) {
+    int x = USLOSS_PsrSet(old_psr); x++;
+}
+
+// define nullsys
+static void nullsys() {
+    printf("Error: Invalid syscall\n");
+    USLOSS_Halt(1);
+}
+
 static void clock_handler(int dev, void *arg) {
     disableInterrupts();
     // ensure device is clock
@@ -168,12 +172,16 @@ static void clock_handler(int dev, void *arg) {
 }
 
 static void disk_handler(int dev, void *arg) {
-    disableInterrupts();
+    disableInterrupts();\
     // ensure device is disk
     if (dev != 1 && dev != 2) {
         USLOSS_Console("Disk handler called by incorrect device\n");
         USLOSS_Halt(1);
     }
+    int status;
+    long unit = (int)(long)arg;
+    USLOSS_DeviceInput(dev, unit, &status);
+    MboxCondSend(device[dev], &status, sizeof(int));
     enableInterrupts();
 }
 
@@ -184,6 +192,10 @@ static void term_handler(int dev, void *arg) {
         USLOSS_Console("Terminal handler called by incorrect device\n");
         USLOSS_Halt(1);
     }
+    int status;
+    long unit = (int)(long)arg;
+    USLOSS_DeviceInput(dev, unit, &status);
+    MboxCondSend(device[dev], &status, sizeof(int));
     enableInterrupts();
 }
 
@@ -196,23 +208,19 @@ static void syscall_handler(int dev, void *arg) {
     enableInterrupts();
 }
 
-void restoreInterrupts(int old_psr) {
-    int x = USLOSS_PsrSet(old_psr); x++;
-}
+// int testcaseWrapper(void *) {
+//     // Call testcase_main() and halt once it returns:
+//     int retVal = testcase_main();
+//     if (retVal == 0) {   // terminated normally
+//         USLOSS_Halt(0);
+//     } else {    // errors
+//         USLOSS_Console("Some error was detected by the testcase.\n");
+//         USLOSS_Halt(retVal);
+//     }
 
-/*int testcaseWrapper(void *) {
-    // Call testcase_main() and halt once it returns:
-    int retVal = testcase_main();
-    if (retVal == 0) {   // terminated normally
-        USLOSS_Halt(0);
-    } else {    // errors
-        USLOSS_Console("Some error was detected by the testcase.\n");
-        USLOSS_Halt(retVal);
-    }
-
-    // Should never get here, just making the compiler happy:
-    return 1;
-}*/
+//     // Should never get here, just making the compiler happy:
+//     return 1;
+// }
 
 void phase2_init(void) {
     // set all of the elements of systemCallVec[] to nullsys
@@ -262,7 +270,6 @@ void phase2_init(void) {
 }
 
 void phase2_start_service_processes(void) {
-    // handle start service processes here
     /*int status;
     int result = spork("testcase_main", (*testcaseWrapper), NULL, USLOSS_MIN_STACK, 3);
     if (result < 0) {
@@ -407,7 +414,6 @@ static int send(int mailboxID, void *message, int messageSize, int condition) {
         enableInterrupts();
         return -1;
     }
-
     // Check to see if any consumers are waiting:
     while (thisBox->blockedConsumers == NULL && outOfSlots(thisBox->slots, thisBox->slotsUsed)) {
         if (condition == 1) {   // conditional send
@@ -418,14 +424,12 @@ static int send(int mailboxID, void *message, int messageSize, int condition) {
             blockMe();
         }
     }
-
     // Slots available
     if (thisBox->blockedConsumers != NULL) {
         struct shadowTable *consumer = dequeueProcess(thisBox->blockedConsumers);
         if (consumer == thisBox->blockedConsumers) {
             thisBox->blockedConsumers = NULL;
         }
-
         strcpy(consumer->message, message);
         consumer->status = 1;
         unblockProc(consumer->pid);
@@ -444,7 +448,6 @@ static int send(int mailboxID, void *message, int messageSize, int condition) {
         }
         thisBox->slots = enqueueSlot(thisBox->slots, newSlot);
     }
-
     // check if there are consumers waiting in the consumer queue
     // if yes, deliver message directly to the first consumer in the queue, wake it up, and remove it from the queue
     // if no consumers are waiting, check if there's space in the mailbox's slots
@@ -478,7 +481,7 @@ static int receive(int mailboxID, void *message, int maxMessageSize, int conditi
         return -1;
     }
     int messageReceivedSize = 0;
-
+    // handle receive logic here
     // If mailbox was released, return error:
     if (thisBox->status == 0) {
         return -1;
