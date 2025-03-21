@@ -51,7 +51,7 @@ struct shadowTable {
     int status;
     // message and message size for slots
     int messageSize;
-    char **message;
+    void *message;
     struct mailSlot *slotPointer;
     struct shadowTable *processPointer;
     struct shadowTable *nextInQueue;    // TODO may need nexts for producers and consumers
@@ -164,7 +164,7 @@ static void clock_handler(int dev, void *arg) {
     int curTime = currentTime();
     if (curTime >= totalTime + 100) {
         int status;
-        MboxCondSend(device[dev], &status, sizeof(int));
+        MboxCondSend(device[0], &status, sizeof(int));
         totalTime = currentTime();
     }
 }
@@ -178,7 +178,7 @@ static void disk_handler(int dev, void *arg) {
     int status;
     long unit = (int)(long)arg;
     USLOSS_DeviceInput(dev, unit, &status);
-    MboxCondSend(device[dev], &status, sizeof(int));
+    MboxCondSend(device[1+unit], &status, sizeof(int));
 }
 
 static void term_handler(int dev, void *arg) {
@@ -190,7 +190,7 @@ static void term_handler(int dev, void *arg) {
     int status;
     long unit = (int)(long)arg;
     USLOSS_DeviceInput(dev, unit, &status);
-    MboxCondSend(device[dev], &status, sizeof(int));
+    MboxCondSend(device[3+unit], &status, sizeof(int));
 }
 
 static void syscall_handler(int dev, void *arg) {
@@ -529,10 +529,33 @@ int MboxCondRecv(int mailboxID, void *message, int maxMessageSize) {
 }
 
 void waitDevice(int type, int unit, int *status) {
+    disableInterrupts();
     if ((USLOSS_PsrGet() & USLOSS_PSR_CURRENT_MODE) == 0) {
         USLOSS_Console("ERROR: Someone attempted to call waitDevice() while in user mode!\n");
         USLOSS_Halt(1);
     }
-    disableInterrupts();
+    int thisDev;
+    if (type == USLOSS_CLOCK_DEV) {
+        thisDev = 0;
+    } else if(type == USLOSS_DISK_DEV) {
+        thisDev = 1;
+    } else if(type == USLOSS_TERM_DEV) {
+        thisDev = 3;
+    } else {
+        USLOSS_Console("Invalid type for wait device\n");
+        USLOSS_Halt(1);
+    }
+
+    if (thisDev == 0 && unit != 0) {
+        USLOSS_Console("Invalid unit for clock device\n");
+        USLOSS_Halt(1);
+    } else if (thisDev == 1 && (unit < 0 || unit > 1)) {
+        USLOSS_Console("Invalid unit for disk device\n");
+        USLOSS_Halt(1);
+    } else if (thisDev == 3 && (unit < 0 || unit > 3)) {
+        USLOSS_Console("Invalid unit for terminal device\n");
+        USLOSS_Halt(1);
+    }
+    MboxRecv(device[thisDev+unit], status, sizeof(int));
     enableInterrupts();
 }
