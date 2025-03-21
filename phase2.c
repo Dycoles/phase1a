@@ -8,9 +8,9 @@
 #include <stdio.h>
 
 // TEMP VALUES TO ELIMINATE ERRORS; COMMENT OUT LATER
-USLOSS_PSR_CURRENT_MODE = 0;
-USLOSS_PSR_CURRENT_INT = 0;
-USLOSS_MIN_STACK = 0;
+//USLOSS_PSR_CURRENT_MODE = 0;
+//USLOSS_PSR_CURRENT_INT = 0;
+//USLOSS_MIN_STACK = 0;
 
 /*struct queue {
     void *head;
@@ -127,6 +127,29 @@ static void nullsys() {
     USLOSS_Halt(1);
 }
 
+int disableInterrupts() {
+    // store psr for later
+    int old_psr = USLOSS_PsrGet();
+
+    // ensure we are in kernel mode
+    if (USLOSS_PsrSet(old_psr & ~USLOSS_PSR_CURRENT_INT) != 0) {
+        USLOSS_Console("ERROR: cannot disable interrupts in user mode\n");
+        USLOSS_Halt(1);
+    }
+
+    return old_psr;
+}
+
+void enableInterrupts() {
+    // ensure we are in kernel mode
+    if ((USLOSS_PsrGet() & USLOSS_PSR_CURRENT_MODE) == 0) {
+        USLOSS_Console("ERROR: cannot enable interrupts in user mode\n");
+    }
+
+    // restore interrupts; x used to keep compiler happy
+    int x = USLOSS_PsrSet(USLOSS_PsrGet() | USLOSS_PSR_CURRENT_INT); x++;
+}
+
 static void clock_handler(int dev, void *arg) {
     disableInterrupts();
     // ensure device is clock
@@ -139,13 +162,13 @@ static void clock_handler(int dev, void *arg) {
     if (curTime >= totalTime + 100) {
         int status;
         MboxCondSend(device[dev], &status, sizeof(int));
-        totalTime = currentTime;
+        totalTime = currentTime();
     }
     enableInterrupts();
 }
 
 static void disk_handler(int dev, void *arg) {
-    disableInterrupts();\
+    disableInterrupts();
     // ensure device is disk
     if (dev != 1 && dev != 2) {
         USLOSS_Console("Disk handler called by incorrect device\n");
@@ -173,46 +196,23 @@ static void syscall_handler(int dev, void *arg) {
     enableInterrupts();
 }
 
-int disableInterrupts() {
-    // store psr for later
-    int old_psr = USLOSS_PsrGet();
-
-    // ensure we are in kernel mode
-    if (USLOSS_PsrSet(old_psr & ~USLOSS_PSR_CURRENT_INT) != 0) {
-        USLOSS_Console("ERROR: cannot disable interrupts in user mode\n");
-        USLOSS_Halt(1);
-    }
-
-    return old_psr;
-}
-
-void enableInterrupts() {
-    // ensure we are in kernel mode
-    if ((USLOSS_PsrGet() & USLOSS_PSR_CURRENT_MODE) == 0) {
-        USLOSS_Console("ERROR: cannot enable interrupts in user mode\n");
-    }
-
-    // restore interrupts; x used to keep compiler happy
-    int x = USLOSS_PsrSet(USLOSS_PsrGet() | USLOSS_PSR_CURRENT_INT); x++;
-}
-
 void restoreInterrupts(int old_psr) {
     int x = USLOSS_PsrSet(old_psr); x++;
 }
 
-// int testcaseWrapper(void *) {
-//     // Call testcase_main() and halt once it returns:
-//     int retVal = testcase_main();
-//     if (retVal == 0) {   // terminated normally
-//         USLOSS_Halt(0);
-//     } else {    // errors
-//         USLOSS_Console("Some error was detected by the testcase.\n");
-//         USLOSS_Halt(retVal);
-//     }
+/*int testcaseWrapper(void *) {
+    // Call testcase_main() and halt once it returns:
+    int retVal = testcase_main();
+    if (retVal == 0) {   // terminated normally
+        USLOSS_Halt(0);
+    } else {    // errors
+        USLOSS_Console("Some error was detected by the testcase.\n");
+        USLOSS_Halt(retVal);
+    }
 
-//     // Should never get here, just making the compiler happy:
-//     return 1;
-// }
+    // Should never get here, just making the compiler happy:
+    return 1;
+}*/
 
 void phase2_init(void) {
     // set all of the elements of systemCallVec[] to nullsys
@@ -263,17 +263,17 @@ void phase2_init(void) {
 
 void phase2_start_service_processes(void) {
     // handle start service processes here
-    // int status;
-    // int result = spork("testcase_main", (*testcaseWrapper), NULL, USLOSS_MIN_STACK, 3);
-    // if (result < 0) {
-    //     // print errors here then halt
-    //     USLOSS_Console("Errors in spork returned < 0\n");
-    //     USLOSS_Halt(1);
-    // }
-    // if (join(&status) != result) {
-    //     USLOSS_Console("Join failed phase2_start_service_processes\n");
-    //     USLOSS_Halt(1);
-    // }
+    /*int status;
+    int result = spork("testcase_main", (*testcaseWrapper), NULL, USLOSS_MIN_STACK, 3);
+    if (result < 0) {
+        // print errors here then halt
+        USLOSS_Console("Errors in spork returned < 0\n");
+        USLOSS_Halt(1);
+    }
+    if (join(&status) != result) {
+        USLOSS_Console("Join failed phase2_start_service_processes\n");
+        USLOSS_Halt(1);
+    }*/
  }
 
 int MboxCreate(int numSlots, int slotSize) {
@@ -313,7 +313,7 @@ int MboxCreate(int numSlots, int slotSize) {
     curMailBoxId++;
     //USLOSS_Console("Mailbox created\n");
 
-    //enableInterrupts();
+    enableInterrupts();
     // return mailbox id
     return thisBox->mailBoxId;
 }
@@ -404,13 +404,47 @@ static int send(int mailboxID, void *message, int messageSize, int condition) {
     // check for invalid arguments
     if (thisBox->status == 0 || thisBox -> slotSize < messageSize || messageSize < 0) {
         USLOSS_Console("Invalid argument for send, return -1\n");
+        enableInterrupts();
         return -1;
     }
-    // create a slot then check if we have run out of slots
-    if (outOfSlots(thisBox->slots, thisBox->slotsUsed)) {
-        // the system has run out of global mailbox slots, message cannot be queued
-        return -2;
+
+    // Check to see if any consumers are waiting:
+    while (thisBox->blockedConsumers == NULL && outOfSlots(thisBox->slots, thisBox->slotsUsed)) {
+        if (condition == 1) {   // conditional send
+            enableInterrupts();
+            return -2;
+        } else {
+            enqueueProcess(thisBox->blockedProducers, NULL);    // FIXME unsure which producer to add
+            blockMe();
+        }
     }
+
+    // Slots available
+    if (thisBox->blockedConsumers != NULL) {
+        struct shadowTable *consumer = dequeueProcess(thisBox->blockedConsumers);
+        if (consumer == thisBox->blockedConsumers) {
+            thisBox->blockedConsumers = NULL;
+        }
+
+        strcpy(consumer->message, message);
+        consumer->status = 1;
+        unblockProc(consumer->pid);
+    } else {
+        // Add message to a new slot:
+        struct mailSlot *newSlot;
+        for (int i = 0; i < MAXSLOTS; i++) {
+            if (mail_slot[i].status == 0) {
+                newSlot = &mail_slot[i];
+                newSlot->status = 1;
+                strcpy(newSlot->message, message);
+                newSlot->messageSize = messageSize;
+                newSlot->mailBoxID = mailboxID;
+                break;
+            }
+        }
+        thisBox->slots = enqueueSlot(thisBox->slots, newSlot);
+    }
+
     // check if there are consumers waiting in the consumer queue
     // if yes, deliver message directly to the first consumer in the queue, wake it up, and remove it from the queue
     // if no consumers are waiting, check if there's space in the mailbox's slots
