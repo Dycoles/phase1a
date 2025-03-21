@@ -414,7 +414,7 @@ static int send(int mailboxID, void *message, int messageSize, int condition) {
     }
     
     // Check to see if any consumers are waiting:
-    while (thisBox->blockedConsumers == NULL && outOfSlots(thisBox->slots, MAXSLOTS)) {
+    while (thisBox->blockedConsumers == NULL && outOfSlots(thisBox->slots, thisBox->numSlots)) {
         if (condition == 1) {   // conditional send
             thisBox->blockedProducers = enqueueProcess(thisBox->blockedProducers, &process_table[getpid() % MAXPROC]);
             enableInterrupts();
@@ -438,7 +438,7 @@ static int send(int mailboxID, void *message, int messageSize, int condition) {
         unblockProc(consumer->pid);
     } else {
         // Add message to a new slot:
-        struct mailSlot *newSlot;
+        struct mailSlot *newSlot = NULL;
         for (int i = 0; i < MAXSLOTS; i++) {
             if (mail_slot[i].status == 0) {
                 newSlot = &mail_slot[i];
@@ -455,6 +455,11 @@ static int send(int mailboxID, void *message, int messageSize, int condition) {
                 break;
             }
         }
+
+        if (newSlot == NULL) {
+            return -2;
+        }
+
         thisBox->slots = enqueueSlot(thisBox->slots, newSlot);
     }
     // check if there are consumers waiting in the consumer queue
