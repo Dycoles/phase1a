@@ -8,9 +8,9 @@
 #include <stdio.h>
 
 // TEMP VALUES TO ELIMINATE ERRORS; COMMENT OUT LATER
-USLOSS_PSR_CURRENT_MODE = 0;
-USLOSS_PSR_CURRENT_INT = 0;
-USLOSS_MIN_STACK = 0;
+// USLOSS_PSR_CURRENT_MODE = 0;
+// USLOSS_PSR_CURRENT_INT = 0;
+// USLOSS_MIN_STACK = 0;
 
 /*struct queue {
     void *head;
@@ -155,7 +155,6 @@ static void nullsys() {
 }
 
 static void clock_handler(int dev, void *arg) {
-    disableInterrupts();
     // ensure device is clock
     if (dev != 0) {
         USLOSS_Console("Clock handler called by incorrect device\n");
@@ -168,11 +167,9 @@ static void clock_handler(int dev, void *arg) {
         MboxCondSend(device[dev], &status, sizeof(int));
         totalTime = currentTime();
     }
-    enableInterrupts();
 }
 
 static void disk_handler(int dev, void *arg) {
-    disableInterrupts();\
     // ensure device is disk
     if (dev != 1 && dev != 2) {
         USLOSS_Console("Disk handler called by incorrect device\n");
@@ -182,11 +179,9 @@ static void disk_handler(int dev, void *arg) {
     long unit = (int)(long)arg;
     USLOSS_DeviceInput(dev, unit, &status);
     MboxCondSend(device[dev], &status, sizeof(int));
-    enableInterrupts();
 }
 
 static void term_handler(int dev, void *arg) {
-    disableInterrupts();
     // ensure device is terminal
     if (dev != 3 && dev != 4 && dev != 5 && dev != 6) {
         USLOSS_Console("Terminal handler called by incorrect device\n");
@@ -196,16 +191,13 @@ static void term_handler(int dev, void *arg) {
     long unit = (int)(long)arg;
     USLOSS_DeviceInput(dev, unit, &status);
     MboxCondSend(device[dev], &status, sizeof(int));
-    enableInterrupts();
 }
 
 static void syscall_handler(int dev, void *arg) {
-    disableInterrupts();
     if (dev != 8) {
-        USLOSS_Console("Syscall handler called by incorrect device\n");
+        USLOSS_Console("syscallHandler(): Invalid syscall number %d\n", dev);
         USLOSS_Halt(1);
     }
-    enableInterrupts();
 }
 
 // int testcaseWrapper(void *) {
@@ -389,7 +381,7 @@ int MboxRelease(int mailboxID) {
 
     enableInterrupts();
     // return 0, success
-    USLOSS_Console("Mailbox release complete\n");
+    // USLOSS_Console("Mailbox release complete\n");
     return 0;
 }
 
@@ -410,7 +402,7 @@ static int send(int mailboxID, void *message, int messageSize, int condition) {
 
     // check for invalid arguments
     if (thisBox->status == 0 || thisBox -> slotSize < messageSize || messageSize < 0) {
-        USLOSS_Console("Invalid argument for send, return -1\n");
+        // USLOSS_Console("Invalid argument for send, return -1\n");
         enableInterrupts();
         return -1;
     }
@@ -477,7 +469,7 @@ static int receive(int mailboxID, void *message, int maxMessageSize, int conditi
 
     // check for invalid arguments
     if (thisBox->status == 0) {
-        USLOSS_Console("Invalid argument for receive, return -1\n");
+        // USLOSS_Console("Invalid argument for receive, return -1\n");
         return -1;
     }
     int messageReceivedSize = 0;
