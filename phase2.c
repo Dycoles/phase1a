@@ -38,7 +38,7 @@ struct mailBox {
 struct mailSlot {
     int mailBoxID;
     int messageSize;
-    char message[MAX_MESSAGE];
+    char message[MAX_MESSAGE+1];
     // 0 for inactive, 1 for active
     int status;
     struct mailSlot *nextSlot;
@@ -335,7 +335,7 @@ int MboxRelease(int mailboxID) {
         return -1;
     }
     // get mailbox
-    struct mailBox *thisBox = &mail_box[mailboxID];
+    struct mailBox *thisBox = &mail_box[mailboxID % MAXMBOX];
     // if ID is not used on a mailbox that is currently in use return -1
     if (thisBox == NULL || thisBox -> status == 0) {
         USLOSS_Console("Cannot release invalid or inactive mailbox\n");
@@ -404,7 +404,7 @@ static int send(int mailboxID, void *message, int messageSize, int condition) {
         return -1;
     }
     // get mailbox
-    struct mailBox *thisBox = &mail_box[mailboxID];
+    struct mailBox *thisBox = &mail_box[mailboxID % MAXMBOX];
 
     // check for invalid arguments
     if (thisBox->status == 0 || thisBox -> slotSize < messageSize || messageSize < 0) {
@@ -412,26 +412,27 @@ static int send(int mailboxID, void *message, int messageSize, int condition) {
         enableInterrupts();
         return -1;
     }
+    
     // Check to see if any consumers are waiting:
     while (thisBox->blockedConsumers == NULL && outOfSlots(thisBox->slots, MAXSLOTS)) {
         if (condition == 1) {   // conditional send
+            thisBox->blockedProducers = enqueueProcess(thisBox->blockedProducers, &process_table[getpid() % MAXPROC]);
             enableInterrupts();
             return -2;
         } else {
-            enqueueProcess(thisBox->blockedProducers, NULL);    // FIXME unsure which producer to add
+            thisBox->blockedProducers = enqueueProcess(thisBox->blockedProducers, &process_table[getpid() % MAXPROC]);    // FIXME unsure which producer to add
             blockMe();
         }
     }
+    
     // Slots available
     if (thisBox->blockedConsumers != NULL) {
         struct shadowTable *consumer = dequeueProcess(thisBox->blockedConsumers);
         if (consumer == thisBox->blockedConsumers) {
             thisBox->blockedConsumers = NULL;
         }
-        USLOSS_Console("%lu\n", (unsigned long)consumer);
         consumer->pid = 1;
         //USLOSS_Console("%s\n", consumer->message);
-        USLOSS_Console("%s\n", message);
         //strcpy(consumer->message, message);
         consumer->status = 1;
         unblockProc(consumer->pid);
@@ -442,9 +443,15 @@ static int send(int mailboxID, void *message, int messageSize, int condition) {
             if (mail_slot[i].status == 0) {
                 newSlot = &mail_slot[i];
                 newSlot->status = 1;
-                strcpy(newSlot->message, message);
+                if (message == NULL) {
+                    strcpy(newSlot->message, "");
+                } else {
+                    strcpy(newSlot->message, message);
+                }
+                //USLOSS_Console("%s\n", ((char *)message));//strcpy(newSlot->message, *((char **)message));
                 newSlot->messageSize = messageSize;
                 newSlot->mailBoxID = mailboxID;
+                newSlot->nextSlot = NULL;
                 break;
             }
         }
@@ -475,7 +482,7 @@ static int receive(int mailboxID, void *message, int maxMessageSize, int conditi
         return -1;
     }
     // get mailbox
-    struct mailBox *thisBox = &mail_box[mailboxID];
+    struct mailBox *thisBox = &mail_box[mailboxID % MAXMBOX];
 
     // check for invalid arguments
     if (thisBox->status == 0) {
@@ -488,27 +495,46 @@ static int receive(int mailboxID, void *message, int maxMessageSize, int conditi
     if (thisBox->status == 0) {
         return -1;
     }
-
+    
     // Receive message:
     while (thisBox->slots == NULL) {
-        if (condition == 1) {   // conditional send
+        if (condition == 1) {   // conditional receive
+            thisBox->blockedConsumers = enqueueProcess(thisBox->blockedConsumers, &process_table[getpid() % MAXPROC]);
             enableInterrupts();
             return -2;
         } else {
-            enqueueProcess(thisBox->blockedConsumers, NULL);    // FIXME unsure which consumer to add
+            thisBox->blockedConsumers = enqueueProcess(thisBox->blockedConsumers, &process_table[getpid() % MAXPROC]);    // FIXME unsure which consumer to add
             blockMe();
         }
     }
-
+    
     // A message is now available, so receive it:
     struct mailSlot *slot = dequeueSlot(thisBox->slots);
     if (slot == thisBox->slots) {
         thisBox->slots = NULL;
     }
-    strcpy(message, slot->message);
-    
-    enableInterrupts();
-    return strlen(message)+1;
+    if (slot->message == NULL) {
+        strcpy(message, "");
+        enableInterrupts();
+        return 0;
+    } else {
+        // check for insufficient buffer size
+        if (strlen(slot->message) > maxMessageSize) {
+            char oldPartition = slot->message[maxMessageSize-1];    // TODO -2?
+            slot->message[maxMessageSize-1] = '\0';
+            if (message != NULL) strcpy(message, slot->message);
+            slot->message[maxMessageSize-1] = oldPartition;
+            return maxMessageSize;
+        } else {
+            if (message != NULL) strcpy(message, slot->message);
+            enableInterrupts();
+            if (message == NULL || strlen(message)==0) {
+                return 0;
+            } else {
+                return strlen(message)+1;
+            }
+        }
+    }
 }
 
 int MboxSend(int mailboxID, void *message, int messageSize) {
