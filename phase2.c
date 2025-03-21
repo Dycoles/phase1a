@@ -149,14 +149,14 @@ void restoreInterrupts(int old_psr) {
 }
 
 // define nullsys
-static void nullsys() {
-    printf("Error: Invalid syscall\n");
+static void nullsys(USLOSS_Sysargs *args) {
+    USLOSS_Console("nullsys(): Program called an unimplemented syscall.  syscall no: %d   PSR: 0x0%x\n", args->number, USLOSS_PsrGet());
     USLOSS_Halt(1);
 }
 
 static void clock_handler(int dev, void *arg) {
     // ensure device is clock
-    if (dev != 0) {
+    if (dev != USLOSS_CLOCK_DEV) {
         USLOSS_Console("Clock handler called by incorrect device\n");
         USLOSS_Halt(1);
     }
@@ -171,7 +171,7 @@ static void clock_handler(int dev, void *arg) {
 
 static void disk_handler(int dev, void *arg) {
     // ensure device is disk
-    if (dev != 1 && dev != 2) {
+    if (dev != USLOSS_DISK_DEV) {
         USLOSS_Console("Disk handler called by incorrect device\n");
         USLOSS_Halt(1);
     }
@@ -183,7 +183,7 @@ static void disk_handler(int dev, void *arg) {
 
 static void term_handler(int dev, void *arg) {
     // ensure device is terminal
-    if (dev != 3 && dev != 4 && dev != 5 && dev != 6) {
+    if (dev != USLOSS_TERM_DEV) {
         USLOSS_Console("Terminal handler called by incorrect device\n");
         USLOSS_Halt(1);
     }
@@ -194,10 +194,16 @@ static void term_handler(int dev, void *arg) {
 }
 
 static void syscall_handler(int dev, void *arg) {
-    if (dev != 8) {
-        USLOSS_Console("syscallHandler(): Invalid syscall number %d\n", dev);
+    USLOSS_Sysargs *sys = (USLOSS_Sysargs*) arg;
+    if (dev != USLOSS_SYSCALL_INT) {
+        USLOSS_Console("Syscall called by incorrect device");
         USLOSS_Halt(1);
     }
+    if (sys->number < 0 || sys->number >= MAXSYSCALLS) {
+        USLOSS_Console("syscallHandler(): Invalid syscall number %d\n", sys->number);
+        USLOSS_Halt(1);
+    }
+    nullsys(sys);
 }
 
 // int testcaseWrapper(void *) {
