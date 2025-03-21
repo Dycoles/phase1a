@@ -96,12 +96,23 @@ struct mailSlot *dequeueSlot(struct mailSlot *q) {
  }
 
  int outOfSlots(struct mailSlot *q, int slotsLeft) {
+    //USLOSS_Console("OOS\t");
     if (slotsLeft == 0) {
         return 1;
     } else if (q == NULL) {
         return 0;
     } else {
         return outOfSlots(q->nextSlot, slotsLeft-1);
+    }
+ }
+
+ int notInProcessQueue(struct shadowTable *q, struct shadowTable *toTest) {
+    if (q == NULL) {
+        return 1;
+    } else if (toTest->pid == q->pid) {
+        return 0;
+    } else {
+        return notInProcessQueue(q->nextInQueue, toTest);
     }
  }
 
@@ -122,6 +133,7 @@ int curMailBoxId;
 int totalTime = 0;
 
 int disableInterrupts() {
+    //USLOSS_Console("Disable\n");
     // store psr for later
     int old_psr = USLOSS_PsrGet();
 
@@ -135,6 +147,7 @@ int disableInterrupts() {
 }
 
 void enableInterrupts() {
+    //USLOSS_Console("Enable\n");
     // ensure we are in kernel mode
     if ((USLOSS_PsrGet() & USLOSS_PSR_CURRENT_MODE) == 0) {
         USLOSS_Console("ERROR: cannot enable interrupts in user mode\n");
@@ -145,6 +158,7 @@ void enableInterrupts() {
 }
 
 void restoreInterrupts(int old_psr) {
+    //USLOSS_Console("Restore\n");
     int x = USLOSS_PsrSet(old_psr); x++;
 }
 
@@ -155,6 +169,8 @@ static void nullsys(USLOSS_Sysargs *args) {
 }
 
 static void clock_handler(int dev, void *arg) {
+    //USLOSS_Console("TopOfClock\n");
+    int oldpsr = disableInterrupts();
     // ensure device is clock
     if (dev != USLOSS_CLOCK_DEV) {
         USLOSS_Console("Clock handler called by incorrect device\n");
@@ -164,12 +180,17 @@ static void clock_handler(int dev, void *arg) {
     int curTime = currentTime();
     if (curTime >= totalTime + 100) {
         int status;
-        MboxCondSend(device[0], &status, sizeof(int));
         totalTime = currentTime();
+        MboxCondSend(device[0], &status, sizeof(int));
     }
+    restoreInterrupts(oldpsr);
+    //USLOSS_Console("Clock Over: ");
+    //dumpProcesses();
 }
 
 static void disk_handler(int dev, void *arg) {
+    //USLOSS_Console("TopOfDisk\n");
+    int oldpsr = disableInterrupts();
     // ensure device is disk
     if (dev != USLOSS_DISK_DEV) {
         USLOSS_Console("Disk handler called by incorrect device\n");
@@ -179,9 +200,12 @@ static void disk_handler(int dev, void *arg) {
     long unit = (int)(long)arg;
     USLOSS_DeviceInput(dev, unit, &status);
     MboxCondSend(device[1+unit], &status, sizeof(int));
+    restoreInterrupts(oldpsr);
 }
 
 static void term_handler(int dev, void *arg) {
+    //USLOSS_Console("TopOfTerm\n");
+    int oldpsr = disableInterrupts();
     // ensure device is terminal
     if (dev != USLOSS_TERM_DEV) {
         USLOSS_Console("Terminal handler called by incorrect device\n");
@@ -191,9 +215,11 @@ static void term_handler(int dev, void *arg) {
     long unit = (int)(long)arg;
     USLOSS_DeviceInput(dev, unit, &status);
     MboxCondSend(device[3+unit], &status, sizeof(int));
+    restoreInterrupts(oldpsr);
 }
 
 static void syscall_handler(int dev, void *arg) {
+    //USLOSS_Console("Syscall\n");
     USLOSS_Sysargs *sys = (USLOSS_Sysargs*) arg;
     if (dev != USLOSS_SYSCALL_INT) {
         USLOSS_Console("Syscall called by incorrect device");
@@ -221,6 +247,7 @@ static void syscall_handler(int dev, void *arg) {
 // }
 
 void phase2_init(void) {
+    //USLOSS_Console("Init\n");
     // set all of the elements of systemCallVec[] to nullsys
     int old_psr = disableInterrupts();
     for (int i = 0; i < MAXSYSCALLS; i++) {
@@ -268,6 +295,7 @@ void phase2_init(void) {
 }
 
 void phase2_start_service_processes(void) {
+    //USLOSS_Console("SSP\n");
     /*int status;
     int result = spork("testcase_main", (*testcaseWrapper), NULL, USLOSS_MIN_STACK, 3);
     if (result < 0) {
@@ -282,13 +310,15 @@ void phase2_start_service_processes(void) {
  }
 
 int MboxCreate(int numSlots, int slotSize) {
+    //USLOSS_Console("Create\n");
     if ((USLOSS_PsrGet() & USLOSS_PSR_CURRENT_MODE) == 0) {
         USLOSS_Console("ERROR: Someone attempted to call MboxCreate while in user mode!\n");
         USLOSS_Halt(1);
     }
-    disableInterrupts();
+    int oldpsr = disableInterrupts();
     if (numSlots < 0 || slotSize < 0 || numSlots > MAXSLOTS || slotSize > MAX_MESSAGE || mBoxUsed >= MAXMBOX) {
         //USLOSS_Console("Invalid argument or no mailboxes available; cannot create mailbox\n");
+        restoreInterrupts(oldpsr);
         return -1;
     }
     // find an unused mailbox in the array
@@ -318,20 +348,22 @@ int MboxCreate(int numSlots, int slotSize) {
     curMailBoxId++;
     //USLOSS_Console("Mailbox created\n");
 
-    enableInterrupts();
+    restoreInterrupts(oldpsr);
     // return mailbox id
     return thisBox->mailBoxId;
 }
 
 int MboxRelease(int mailboxID) {
+    //USLOSS_Console("Release\n");
     if ((USLOSS_PsrGet() & USLOSS_PSR_CURRENT_MODE) == 0) {
         USLOSS_Console("ERROR: Someone attempted to call MboxRelease() while in user mode!\n");
         USLOSS_Halt(1);
     }
-    disableInterrupts();
+    int oldpsr = disableInterrupts();
     // if mailbox id is invalid, return -1 and print an error 
     if (mailboxID < 0 || mailboxID >= MAXMBOX) {
         USLOSS_Console("Invalid mailbox ID\n");
+        restoreInterrupts(oldpsr);
         return -1;
     }
     // get mailbox
@@ -339,10 +371,12 @@ int MboxRelease(int mailboxID) {
     // if ID is not used on a mailbox that is currently in use return -1
     if (thisBox == NULL || thisBox -> status == 0) {
         USLOSS_Console("Cannot release invalid or inactive mailbox\n");
+        restoreInterrupts(oldpsr);
         return -1;
     }
     // Free all slots consumed by the mailbox
     while (thisBox->slots != NULL) {
+        //USLOSS_Console("Dequ1\n");
         // empty consumed slots here
         struct mailSlot *slot = dequeueSlot(thisBox->slots);
         if (slot == thisBox->slots) {
@@ -357,6 +391,7 @@ int MboxRelease(int mailboxID) {
     }
     // unblock producers and consumers
     while (thisBox->blockedConsumers != NULL) {
+        //USLOSS_Console("Dequ2\n");
         struct shadowTable *consumer = dequeueProcess(thisBox->blockedConsumers);
         if (consumer == thisBox->blockedConsumers) {
             thisBox->blockedConsumers = NULL;
@@ -367,6 +402,7 @@ int MboxRelease(int mailboxID) {
         }
     }
     while (thisBox->blockedProducers != NULL) {
+        //USLOSS_Console("Dequ3\n");
         struct shadowTable *producer = dequeueProcess(thisBox->blockedProducers);
         if (producer == thisBox->blockedProducers) {
             thisBox->blockedProducers = NULL;
@@ -384,23 +420,23 @@ int MboxRelease(int mailboxID) {
     thisBox->status = 0;
     mBoxUsed--;
     // unblock producers and consumers
-
-    enableInterrupts();
+    restoreInterrupts(oldpsr);
     // return 0, success
     // USLOSS_Console("Mailbox release complete\n");
     return 0;
 }
 
 static int send(int mailboxID, void *message, int messageSize, int condition) {
+    USLOSS_Console("Top of send: %d\n", mailboxID);
     if ((USLOSS_PsrGet() & USLOSS_PSR_CURRENT_MODE) == 0) {
         USLOSS_Console("ERROR: Someone attempted to call send() while in user mode!\n");
         USLOSS_Halt(1);
     }
-    disableInterrupts();
+    int oldpsr = disableInterrupts();
     // check for invalid id
     if (mailboxID < 0 || mailboxID >= MAXMBOX) {
         USLOSS_Console("Invalid mailbox ID for send, return -1\n");
-        enableInterrupts();
+        restoreInterrupts(oldpsr);
         return -1;
     }
     // get mailbox
@@ -409,19 +445,26 @@ static int send(int mailboxID, void *message, int messageSize, int condition) {
     // check for invalid arguments
     if (thisBox->status == 0 || thisBox -> slotSize < messageSize || messageSize < 0) {
         // USLOSS_Console("Invalid argument for send, return -1\n");
-        enableInterrupts();
+        restoreInterrupts(oldpsr);
         return -1;
     }
     
     // Check to see if any consumers are waiting:
-    while (thisBox->blockedConsumers == NULL && outOfSlots(thisBox->slots, thisBox->numSlots)) {
+    if (thisBox->blockedConsumers == NULL && outOfSlots(thisBox->slots, thisBox->numSlots)) {
+        USLOSS_Console("sen\n");
         if (condition == 1) {   // conditional send
+            if (thisBox->blockedProducers == &process_table[getpid() % MAXPROC]) {
+                restoreInterrupts(oldpsr);
+                return -2;
+            }
             thisBox->blockedProducers = enqueueProcess(thisBox->blockedProducers, &process_table[getpid() % MAXPROC]);
-            enableInterrupts();
+            restoreInterrupts(oldpsr);
             return -2;
         } else {
-            thisBox->blockedProducers = enqueueProcess(thisBox->blockedProducers, &process_table[getpid() % MAXPROC]);    // FIXME unsure which producer to add
-            blockMe();
+            if (notInProcessQueue(thisBox->blockedProducers, &process_table[getpid() % MAXPROC])) {
+                thisBox->blockedProducers = enqueueProcess(thisBox->blockedProducers, &process_table[getpid() % MAXPROC]);    // FIXME unsure which producer to add
+            }
+            //blockMe();
         }
     }
     
@@ -448,7 +491,7 @@ static int send(int mailboxID, void *message, int messageSize, int condition) {
                 } else {
                     strcpy(newSlot->message, message);
                 }
-                //USLOSS_Console("%s\n", ((char *)message));//strcpy(newSlot->message, *((char **)message));
+                
                 newSlot->messageSize = messageSize;
                 newSlot->mailBoxID = mailboxID;
                 newSlot->nextSlot = NULL;
@@ -457,6 +500,7 @@ static int send(int mailboxID, void *message, int messageSize, int condition) {
         }
 
         if (newSlot == NULL) {
+            restoreInterrupts(oldpsr);
             return -2;
         }
 
@@ -470,20 +514,21 @@ static int send(int mailboxID, void *message, int messageSize, int condition) {
     // for waking up producers, only wake up one producer at a time when a slot becomes available
     // the producer that was first in the queue should be woken first
     // have the producer write its message to the newly available slot
-    enableInterrupts();
+    restoreInterrupts(oldpsr);
     return 0;
 }
 
 static int receive(int mailboxID, void *message, int maxMessageSize, int condition) {
+    USLOSS_Console("Top of recv\n");
     if ((USLOSS_PsrGet() & USLOSS_PSR_CURRENT_MODE) == 0) {
         USLOSS_Console("ERROR: Someone attempted to call receive() while in user mode!\n");
         USLOSS_Halt(1);
     }
-    disableInterrupts();
+    //int oldpsr = disableInterrupts();
     // check for invalid id
     if (mailboxID < 0 || mailboxID >= MAXMBOX) {
         USLOSS_Console("Invalid mailbox ID for send, return -1\n");
-        enableInterrupts();
+        //restoreInterrupts(oldpsr);
         return -1;
     }
     // get mailbox
@@ -492,24 +537,29 @@ static int receive(int mailboxID, void *message, int maxMessageSize, int conditi
     // check for invalid arguments
     if (thisBox->status == 0) {
         // USLOSS_Console("Invalid argument for receive, return -1\n");
+        //restoreInterrupts(oldpsr);
         return -1;
     }
     
     // handle receive logic here
     // If mailbox was released, return error:
     if (thisBox->status == 0) {
+        //restoreInterrupts(oldpsr);
         return -1;
     }
     
     // Receive message:
     while (thisBox->slots == NULL) {
+        USLOSS_Console("recv\n");
         if (condition == 1) {   // conditional receive
             thisBox->blockedConsumers = enqueueProcess(thisBox->blockedConsumers, &process_table[getpid() % MAXPROC]);
-            enableInterrupts();
+            //restoreInterrupts(oldpsr);
             return -2;
         } else {
-            thisBox->blockedConsumers = enqueueProcess(thisBox->blockedConsumers, &process_table[getpid() % MAXPROC]);    // FIXME unsure which consumer to add
-            blockMe();
+            if (notInProcessQueue(thisBox->blockedConsumers, &process_table[getpid() % MAXPROC])) {
+                thisBox->blockedConsumers = enqueueProcess(thisBox->blockedConsumers, &process_table[getpid() % MAXPROC]);    // FIXME unsure which consumer to add
+            }
+            //blockMe();
         }
     }
     
@@ -520,7 +570,7 @@ static int receive(int mailboxID, void *message, int maxMessageSize, int conditi
     }
     if (slot->message == NULL) {
         strcpy(message, "");
-        enableInterrupts();
+        //restoreInterrupts(oldpsr);
         return 0;
     } else {
         // check for insufficient buffer size
@@ -529,10 +579,11 @@ static int receive(int mailboxID, void *message, int maxMessageSize, int conditi
             slot->message[maxMessageSize-1] = '\0';
             if (message != NULL) strcpy(message, slot->message);
             slot->message[maxMessageSize-1] = oldPartition;
+            //restoreInterrupts(oldpsr);
             return maxMessageSize;
         } else {
             if (message != NULL) strcpy(message, slot->message);
-            enableInterrupts();
+            //restoreInterrupts(oldpsr);
             if (message == NULL || strlen(message)==0) {
                 return 0;
             } else {
@@ -540,6 +591,7 @@ static int receive(int mailboxID, void *message, int maxMessageSize, int conditi
             }
         }
     }
+    //USLOSS_Console("PANIC!\n");
 }
 
 int MboxSend(int mailboxID, void *message, int messageSize) {
@@ -560,7 +612,8 @@ int MboxCondRecv(int mailboxID, void *message, int maxMessageSize) {
 }
 
 void waitDevice(int type, int unit, int *status) {
-    disableInterrupts();
+    //USLOSS_Console("Top of wait\n");
+    int oldpsr = disableInterrupts();
     if ((USLOSS_PsrGet() & USLOSS_PSR_CURRENT_MODE) == 0) {
         USLOSS_Console("ERROR: Someone attempted to call waitDevice() while in user mode!\n");
         USLOSS_Halt(1);
@@ -588,5 +641,5 @@ void waitDevice(int type, int unit, int *status) {
         USLOSS_Halt(1);
     }
     MboxRecv(device[thisDev+unit], status, sizeof(int));
-    enableInterrupts();
+    restoreInterrupts(oldpsr);
 }
