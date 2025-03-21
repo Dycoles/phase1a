@@ -51,7 +51,7 @@ struct shadowTable {
     int status;
     // message and message size for slots
     int messageSize;
-    void *message;
+    char **message;
     struct mailSlot *slotPointer;
     struct shadowTable *processPointer;
     struct shadowTable *nextInQueue;    // TODO may need nexts for producers and consumers
@@ -95,13 +95,13 @@ struct mailSlot *dequeueSlot(struct mailSlot *q) {
     }
  }
 
- int outOfSlots(struct mailSlot *q, int slotsUsed) {
-    if (q == NULL) {
-        return 0;
-    } else if (slotsUsed == 0) {
+ int outOfSlots(struct mailSlot *q, int slotsLeft) {
+    if (slotsLeft == 0) {
         return 1;
+    } else if (q == NULL) {
+        return 0;
     } else {
-        return outOfSlots(q->nextSlot, slotsUsed-1);
+        return outOfSlots(q->nextSlot, slotsLeft-1);
     }
  }
 
@@ -413,7 +413,7 @@ static int send(int mailboxID, void *message, int messageSize, int condition) {
         return -1;
     }
     // Check to see if any consumers are waiting:
-    while (thisBox->blockedConsumers == NULL && outOfSlots(thisBox->slots, thisBox->slotsUsed)) {
+    while (thisBox->blockedConsumers == NULL && outOfSlots(thisBox->slots, MAXSLOTS)) {
         if (condition == 1) {   // conditional send
             enableInterrupts();
             return -2;
@@ -428,7 +428,11 @@ static int send(int mailboxID, void *message, int messageSize, int condition) {
         if (consumer == thisBox->blockedConsumers) {
             thisBox->blockedConsumers = NULL;
         }
-        strcpy(consumer->message, message);
+        USLOSS_Console("%lu\n", (unsigned long)consumer);
+        consumer->pid = 1;
+        //USLOSS_Console("%s\n", consumer->message);
+        USLOSS_Console("%s\n", message);
+        //strcpy(consumer->message, message);
         consumer->status = 1;
         unblockProc(consumer->pid);
     } else {
@@ -478,7 +482,7 @@ static int receive(int mailboxID, void *message, int maxMessageSize, int conditi
         // USLOSS_Console("Invalid argument for receive, return -1\n");
         return -1;
     }
-    int messageReceivedSize = 0;
+    
     // handle receive logic here
     // If mailbox was released, return error:
     if (thisBox->status == 0) {
@@ -501,10 +505,10 @@ static int receive(int mailboxID, void *message, int maxMessageSize, int conditi
     if (slot == thisBox->slots) {
         thisBox->slots = NULL;
     }
-    // TODO finish receive
+    strcpy(message, slot->message);
     
     enableInterrupts();
-    return messageReceivedSize;
+    return strlen(message)+1;
 }
 
 int MboxSend(int mailboxID, void *message, int messageSize) {
