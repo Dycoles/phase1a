@@ -47,6 +47,7 @@ struct mailSlot {
 
 struct shadowTable {
     // pid for processes
+    int mailboxID;
     int pid;
     // 0 for blocked, 1 for ready
     int status;
@@ -276,6 +277,7 @@ void phase2_init(void) {
     // set all elements of process_table to null or zero
     for (int i = 0; i < MAXPROC; i++) {
         process_table[i].pid = 0;
+        process_table[i].mailboxID = 0;
         process_table[i].status = 0;
         process_table[i].message = NULL;
         process_table[i].messageSize = 0;
@@ -440,11 +442,11 @@ static int send(int mailboxID, void *message, int messageSize, int condition) {
         USLOSS_Console("ERROR: Someone attempted to call send() while in user mode!\n");
         USLOSS_Halt(1);
     }
-    //int oldpsr = disableInterrupts();
+    int oldpsr = disableInterrupts();
     // check for invalid id
     if (mailboxID < 0 || mailboxID >= MAXMBOX) {
         USLOSS_Console("Invalid mailbox ID for send, return -1\n");
-        //restoreInterrupts(oldpsr);
+        restoreInterrupts(oldpsr);
         return -1;
     }
     // get mailbox
@@ -453,7 +455,7 @@ static int send(int mailboxID, void *message, int messageSize, int condition) {
     // check for invalid arguments
     if (thisBox->status == 0 || thisBox -> slotSize < messageSize || messageSize < 0) {
         // USLOSS_Console("Invalid argument for send, return -1\n");
-        //restoreInterrupts(oldpsr);
+        restoreInterrupts(oldpsr);
         return -1;
     }
     
@@ -462,21 +464,40 @@ static int send(int mailboxID, void *message, int messageSize, int condition) {
         //USLOSS_Console("sen\n");
         if (condition == 1) {   // conditional send
             if (thisBox->blockedProducers == &process_table[getpid() % MAXPROC]) {
-                //restoreInterrupts(oldpsr);
+                restoreInterrupts(oldpsr);
                 return -2;
             }
             thisBox->blockedProducers = enqueueProcess(thisBox->blockedProducers, &process_table[getpid() % MAXPROC]);
-            //restoreInterrupts(oldpsr);
+            restoreInterrupts(oldpsr);
             return -2;
         } else {
             if (getpid() != process_table[getpid()%MAXPROC].pid) {
                 process_table[getpid()%MAXPROC].pid = getpid();
-                USLOSS_Console("%d new pid\n", getpid());
+                // USLOSS_Console("%d new pid\n", getpid());
             }
+            // store process info before blocking
+            process_table[getpid()%MAXPROC].message = message;
+            process_table[getpid()%MAXPROC].messageSize = messageSize;
+            process_table[getpid()%MAXPROC].mailboxID = mailboxID;
             if (notInProcessQueue(thisBox->blockedProducers, &process_table[getpid() % MAXPROC])) {
                 thisBox->blockedProducers = enqueueProcess(thisBox->blockedProducers, &process_table[getpid() % MAXPROC]);    // FIXME unsure which producer to add
             }
+            // status is disabled
+            process_table[getpid()%MAXPROC].status = -1;
+            restoreInterrupts(oldpsr);
             blockMe();
+            oldpsr = disableInterrupts();
+            
+            int result = process_table[getpid()%MAXPROC].status;
+            // mailbox was released, we should return -1
+            if (result == -1 || thisBox->status == 0) {
+                restoreInterrupts(oldpsr);
+                return -1;
+            }
+            
+            // message was delivered successfully
+            restoreInterrupts(oldpsr);
+            return 0;
         }
     }
     
@@ -486,10 +507,15 @@ static int send(int mailboxID, void *message, int messageSize, int condition) {
         if (consumer == thisBox->blockedConsumers) {
             thisBox->blockedConsumers = NULL;
         }
-        consumer->pid = 1;
-        //USLOSS_Console("%s\n", consumer->message);
-        //strcpy(consumer->message, message);
-        consumer->status = 1;
+        // copy message to consumer's buffer
+        if (message != NULL && consumer->message != NULL) {
+            memcpy(consumer->message, message, messageSize);
+        }
+        
+        consumer->messageSize = messageSize;
+        consumer->status = 0;
+        
+        // wake up the consumer
         unblockProc(consumer->pid);
     } else {
         // Add message to a new slot:
@@ -499,9 +525,9 @@ static int send(int mailboxID, void *message, int messageSize, int condition) {
                 newSlot = &mail_slot[i];
                 newSlot->status = 1;
                 if (message == NULL) {
-                    strcpy(newSlot->message, "");
+                    memset(newSlot->message, 0, thisBox->slotSize);
                 } else {
-                    strcpy(newSlot->message, message);
+                    memcpy(newSlot->message, message, messageSize);
                 }
                 
                 newSlot->messageSize = messageSize;
@@ -513,7 +539,7 @@ static int send(int mailboxID, void *message, int messageSize, int condition) {
         }
 
         if (newSlot == NULL) {
-            //restoreInterrupts(oldpsr);
+            restoreInterrupts(oldpsr);
             return -2;
         }
 
@@ -527,7 +553,7 @@ static int send(int mailboxID, void *message, int messageSize, int condition) {
     // for waking up producers, only wake up one producer at a time when a slot becomes available
     // the producer that was first in the queue should be woken first
     // have the producer write its message to the newly available slot
-    //restoreInterrupts(oldpsr);
+    restoreInterrupts(oldpsr);
     return 0;
 }
 
