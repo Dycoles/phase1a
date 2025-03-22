@@ -529,7 +529,6 @@ static int send(int mailboxID, void *message, int messageSize, int condition) {
                 } else {
                     memcpy(newSlot->message, message, messageSize);
                 }
-                
                 newSlot->messageSize = messageSize;
                 newSlot->mailBoxID = mailboxID;
                 newSlot->pidProducedBy = getpid();
@@ -542,7 +541,6 @@ static int send(int mailboxID, void *message, int messageSize, int condition) {
             restoreInterrupts(oldpsr);
             return -2;
         }
-
         thisBox->slots = enqueueSlot(thisBox->slots, newSlot);
     }
     // check if there are consumers waiting in the consumer queue
@@ -558,16 +556,16 @@ static int send(int mailboxID, void *message, int messageSize, int condition) {
 }
 
 static int receive(int mailboxID, void *message, int maxMessageSize, int condition) {
-    //USLOSS_Console("Top of recv\n");
+    //USLOSS_Console("Top of recv: %d\n", getpid());
     if ((USLOSS_PsrGet() & USLOSS_PSR_CURRENT_MODE) == 0) {
         USLOSS_Console("ERROR: Someone attempted to call receive() while in user mode!\n");
         USLOSS_Halt(1);
     }
-    //int oldpsr = disableInterrupts();
+    int oldpsr = disableInterrupts();
     // check for invalid id
     if (mailboxID < 0 || mailboxID >= MAXMBOX) {
         USLOSS_Console("Invalid mailbox ID for send, return -1\n");
-        //restoreInterrupts(oldpsr);
+        restoreInterrupts(oldpsr);
         return -1;
     }
     // get mailbox
@@ -576,79 +574,107 @@ static int receive(int mailboxID, void *message, int maxMessageSize, int conditi
     // check for invalid arguments
     if (thisBox->status == 0) {
         // USLOSS_Console("Invalid argument for receive, return -1\n");
-        //restoreInterrupts(oldpsr);
+        restoreInterrupts(oldpsr);
         return -1;
     }
     
     // handle receive logic here
     // If mailbox was released, return error:
     if (thisBox->status == 0) {
-        //restoreInterrupts(oldpsr);
+        restoreInterrupts(oldpsr);
         return -1;
     }
     
+    // get current process info
+    int pid = getpid();
+    struct shadowTable *proc = &process_table[pid % MAXPROC];
+    proc->pid = pid;
+    proc->message = message;
+    proc->messageSize = maxMessageSize;
+    proc->mailboxID = mailboxID;
+
     // Receive message:
     if (thisBox->slots == NULL) {
         USLOSS_Console("recv %d\n", USLOSS_PsrGet());
         //dumpProcesses();
         if (condition == 1) {   // conditional receive
-            thisBox->blockedConsumers = enqueueProcess(thisBox->blockedConsumers, &process_table[getpid() % MAXPROC]);
-            //restoreInterrupts(oldpsr);
+            restoreInterrupts(oldpsr);
             return -2;
+        }
+        thisBox->blockedConsumers = enqueueProcess(thisBox->blockedConsumers, proc);
+        restoreInterrupts(oldpsr);
+        blockMe();
+
+         // process unblocked, check to see if mailbox hasn't been released
+         oldpsr = disableInterrupts();
+         if (thisBox->status == 0) {
+             restoreInterrupts(oldpsr);
+             return -1;
+         }
+         
+         // sender should have copied message to buffer
+         restoreInterrupts(oldpsr);
+         return proc->messageSize;
+    }
+    struct mailSlot *slot = thisBox->slots;
+    // update slot queue
+    if (slot->nextSlot == NULL) {
+        thisBox->slots = NULL;
+    } else {
+        thisBox->slots = slot->nextSlot;
+    }
+
+    // copy the message
+    int msgSize = slot->messageSize;
+    if (message != NULL && msgSize > 0) {
+        // check if message fits in the buffer
+        int copySize = (msgSize <= maxMessageSize) ? msgSize : maxMessageSize;
+        memcpy(message, slot->message, copySize);
+    }
+    // slot used for message
+    thisBox->slotsUsed--;
+    slot->status = 0;
+    
+    // check for blocked producers waiting for a slot
+    if (thisBox->blockedProducers != NULL) {
+        struct shadowTable *producer = thisBox->blockedProducers;
+        // update producer queue
+        if (producer->nextInQueue == NULL) {
+            thisBox->blockedProducers = NULL;
         } else {
-            if (getpid() != process_table[getpid()%MAXPROC].pid) {
-                process_table[getpid()%MAXPROC].pid = getpid();
-                USLOSS_Console("%d old pid\n", getpid());
+            thisBox->blockedProducers = producer->nextInQueue;
+        }
+        
+        producer->nextInQueue = NULL;
+        // create a new slot for the producer's message
+        for (int i = 0; i < MAXSLOTS; i++) {
+            if (mail_slot[i].status == 0) {
+                struct mailSlot *newSlot = &mail_slot[i];
+                newSlot->status = 1;
+                newSlot->mailBoxID = mailboxID;
+                newSlot->messageSize = producer->messageSize;
+                newSlot->pidProducedBy = producer->pid;
+                // copy message to slot
+                if (producer->message != NULL) {
+                    memcpy(newSlot->message, producer->message, producer->messageSize);
+                }
+                // add slot to mailbox
+                newSlot->nextSlot = thisBox->slots;
+                thisBox->slots = newSlot;
+                thisBox->slotsUsed++;
+                
+                // set the status of the producer
+                producer->status = 0;
+                // unblock producer
+                unblockProc(producer->pid);
+                break;
             }
-            if (notInProcessQueue(thisBox->blockedConsumers, &process_table[getpid() % MAXPROC])) {
-                thisBox->blockedConsumers = enqueueProcess(thisBox->blockedConsumers, &process_table[getpid() % MAXPROC]);    // FIXME unsure which consumer to add
-            }
-            dumpProcesses();
-            blockMe();
         }
     }
     
-    // A message is now available, so receive it:
-    struct mailSlot *slot = dequeueSlot(thisBox->slots);
-    if (slot == thisBox->slots) {
-        thisBox->slots = NULL;
-    }
-    if (slot->message == NULL) {
-        strcpy(message, "");
-        USLOSS_Console("Unblocking %d\n", slot->pidProducedBy);
-        dumpProcesses();
-        unblockProc(slot->pidProducedBy);
-        dumpProcesses();
-        //restoreInterrupts(oldpsr);
-        return 0;
-    } else {
-        // check for insufficient buffer size
-        if (strlen(slot->message) > maxMessageSize) {
-            char oldPartition = slot->message[maxMessageSize-1];    // TODO -2?
-            slot->message[maxMessageSize-1] = '\0';
-            if (message != NULL) strcpy(message, slot->message);
-            slot->message[maxMessageSize-1] = oldPartition;
-            USLOSS_Console("Unblocking %d\n", slot->pidProducedBy);
-            dumpProcesses();
-            unblockProc(slot->pidProducedBy);
-            dumpProcesses();
-            //restoreInterrupts(oldpsr);
-            return maxMessageSize;
-        } else {
-            if (message != NULL) strcpy(message, slot->message);
-            //restoreInterrupts(oldpsr);
-            USLOSS_Console("Unblocking %d\n", slot->pidProducedBy);
-            dumpProcesses();
-            unblockProc(slot->pidProducedBy);
-            dumpProcesses();
-            if (message == NULL || strlen(message)==0) {
-                return 0;
-            } else {
-                return strlen(message)+1;
-            }
-        }
-    }
-    //USLOSS_Console("PANIC!\n");
+    // Return the size of the message
+    restoreInterrupts(oldpsr);
+    return msgSize;
 }
 
 int MboxSend(int mailboxID, void *message, int messageSize) {
