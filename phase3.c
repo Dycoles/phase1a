@@ -10,12 +10,10 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-int spawningMBoxID;
-int waitingMBoxID;
-int terminatingMBoxID;
+int userModeMBoxID;
 
-int lockSpawningMBox() {
-    MboxSend(spawningMBoxID, NULL, 0);
+int lockUserModeMBox() {
+    MboxSend(userModeMBoxID, NULL, 0);
     int old_psr = USLOSS_PsrGet();  // FIXME This may not be allowed
     // ensure we are in kernel mode
     if (USLOSS_PsrSet(old_psr & ~USLOSS_PSR_CURRENT_INT) != 0) {
@@ -25,8 +23,8 @@ int lockSpawningMBox() {
     return old_psr;
 }
 
-void unlockSpawningMBox(int old_psr) {
-    MboxRecv(spawningMBoxID, NULL, 0);
+void unlockUserModeMBox(int old_psr) {
+    MboxRecv(userModeMBoxID, NULL, 0);
     if ((USLOSS_PsrGet() & USLOSS_PSR_CURRENT_MODE) == 0) {
         USLOSS_Console("ERROR: cannot enable interrupts in user mode\n");
     }
@@ -36,7 +34,7 @@ void unlockSpawningMBox(int old_psr) {
 
 void spawnSyscall(USLOSS_Sysargs *args) {   // FIXME Error with running in kernel mode when it shouldn't be
     //USLOSS_Console("Now in spawn\n");
-    int old_psr = lockSpawningMBox();
+    int old_psr = lockUserModeMBox();
 
     int newPID = spork((char *)args->arg5, (int(*)(void *))args->arg1, args->arg2, (int)args->arg3, (int)args->arg4);
 
@@ -47,13 +45,13 @@ void spawnSyscall(USLOSS_Sysargs *args) {   // FIXME Error with running in kerne
         args->arg4 = (void *)-1;
     }
 
-    unlockSpawningMBox(old_psr);
+    unlockUserModeMBox(old_psr);
     //USLOSS_Console("End of innerSpawn\n");
 }
 
 int waitSyscall(USLOSS_Sysargs *args) {
     //USLOSS_Console("Now in wait\n");
-    int old_psr = lockSpawningMBox();
+    int old_psr = lockUserModeMBox();
 
     int status;
     int retVal = join(&status);
@@ -66,13 +64,13 @@ int waitSyscall(USLOSS_Sysargs *args) {
         args->arg4 = (void *) 0;
     }
 
-    unlockSpawningMBox(old_psr);
+    unlockUserModeMBox(old_psr);
     //USLOSS_Console("End of innerWait\n");
 }
 
 void terminateSyscall(USLOSS_Sysargs *args) {
     //USLOSS_Console("Now in terminate\n");
-    int old_psr = lockSpawningMBox();
+    int old_psr = lockUserModeMBox();
     USLOSS_Halt(0); // FIXME Should wait for all children before terminating
 }
 
@@ -115,7 +113,7 @@ void phase3_init() {
     // TODO Maybe add kern sem funs?
     systemCallVec[SYS_DUMPPROCESSES] = (void (*)(USLOSS_Sysargs *))dumpProcesses;
 
-    spawningMBoxID = MboxCreate(1, 0);
+    userModeMBoxID = MboxCreate(1, 0);
     //waitingMBoxID = MboxCreate(1, 0);
     //terminatingMBoxID = MboxCreate(1, 0);
 }
