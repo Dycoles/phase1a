@@ -10,56 +10,52 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-int spawnSyscall(char *name, int (*func)(void *), void *arg, 
-int stack_size, int priority, int *pid) {
+void spawnSyscall(USLOSS_Sysargs *args) {   // FIXME Error with running in kernel mode when it shouldn't be
     //USLOSS_Console("Now in spawn\n");
-    //int result = trampoline();
+
+    int newPID = spork((char *)args->arg5, (int(*)(void *))args->arg1, args->arg2, (int)args->arg3, (int)args->arg4);
+    //USLOSS_Console("End of spawn\n");
+    args->arg1 = (void *)newPID;
+
+    if (newPID >= 0) {
+        args->arg4 = (void *)0;
+    } else {
+        args->arg4 = (void *)-1;
+    }
 }
 
-int waitSyscall(int *pid, int *status) {
+int waitSyscall(USLOSS_Sysargs *args) {
     //USLOSS_Console("Now in wait\n");
 }
 
-void terminateSyscall(int status) {
+void terminateSyscall(USLOSS_Sysargs *args) {
     //USLOSS_Console("Now in terminate\n");
     USLOSS_Halt(0); // FIXME Should wait for all children before terminating
 }
 
-int semCreateSyscall(int value, int *semaphore) {
+int semCreateSyscall(USLOSS_Sysargs *args) {
     //USLOSS_Console("Now in create\n");
 }
 
-int semPSyscall(int semaphore) {
+int semPSyscall(USLOSS_Sysargs *args) {
     //USLOSS_Console("Now in P\n");
 }
 
-int semVSyscall(int semaphore) {
+int semVSyscall(USLOSS_Sysargs *args) {
     //USLOSS_Console("Now in V\n");
 }
 
+// FIXME Kern funs added so it compiles. Unsure what needs to be done for these.
 int kernSemCreate(int value, int *semaphore) {
     //USLOSS_Console("Now in kern create\n");
 }
-
 int kernSemP(int semaphore) {
     //USLOSS_Console("Now in kern P\n");
 }
-
 int kernSemV(int semaphore) {
     //USLOSS_Console("Now in kern V\n");
 }
 
-/*void getTimeofDaySyscall(int *tod) {
-
-}
-
-void getPIDSyscall(int *pid) {
-    
-}
-
-void dumpProcessesSyscall() {
-
-}*/
 
 
 
