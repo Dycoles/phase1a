@@ -11,6 +11,8 @@
 #include <stdio.h>
 
 int userModeMBoxID;
+int semaphores[MAXSEMS];
+int curSem;
 
 int lockUserModeMBox() {
     MboxSend(userModeMBoxID, NULL, 0);
@@ -74,15 +76,27 @@ void terminateSyscall(USLOSS_Sysargs *args) {
     USLOSS_Halt(0); // FIXME Should wait for all children before terminating
 }
 
-int semCreateSyscall(USLOSS_Sysargs *args) {
+void semCreateSyscall(USLOSS_Sysargs *args) {
     //USLOSS_Console("Now in create\n");
+    int old_psr = lockUserModeMBox();
+    
+    // If out of semaphores or invalid input, return error:
+    if (curSem >= MAXSEMS || args->arg1 < 0) {
+        args->arg4 = -1;
+    } else {
+        semaphores[curSem] = args->arg1;
+        args->arg1 = curSem++;
+        args->arg4 = 0;
+    }
+
+    unlockUserModeMBox(old_psr);
 }
 
-int semPSyscall(USLOSS_Sysargs *args) {
+void semPSyscall(USLOSS_Sysargs *args) {
     //USLOSS_Console("Now in P\n");
 }
 
-int semVSyscall(USLOSS_Sysargs *args) {
+void semVSyscall(USLOSS_Sysargs *args) {
     //USLOSS_Console("Now in V\n");
 }
 
@@ -116,6 +130,11 @@ void phase3_init() {
     userModeMBoxID = MboxCreate(1, 0);
     //waitingMBoxID = MboxCreate(1, 0);
     //terminatingMBoxID = MboxCreate(1, 0);
+
+    curSem = 0;
+    for (int i = 0; i < MAXSEMS; i++) {
+        semaphores[i] = -1;
+    }
 }
 
 void phase3_start_service_processes() {
