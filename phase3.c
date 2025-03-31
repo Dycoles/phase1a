@@ -11,6 +11,8 @@
 #include <stdio.h>
 
 int userModeMBoxID;
+int spawnTrampolineMBoxID;
+int(*trampolineFunc)(void *);
 int semaphores[MAXSEMS];
 int curSem;
 
@@ -34,11 +36,31 @@ void unlockUserModeMBox(int old_psr) {
     int x = USLOSS_PsrSet(old_psr); x++;   // FIXME This may not be allowed
 }
 
+int userModeTrampoline(void *arg) {
+    int old_psr = USLOSS_PsrGet();
+    if (USLOSS_PsrSet(old_psr & ~1) != 0) {
+        USLOSS_Console("ERROR: cannot disable interrupts in user mode\n");
+        USLOSS_Halt(1);
+    }
+
+    int result = trampolineFunc(arg);
+
+    if ((USLOSS_PsrGet() & USLOSS_PSR_CURRENT_MODE) == 0) {
+        USLOSS_Console("ERROR: cannot enable interrupts in user mode\n");
+    }
+    int x = USLOSS_PsrSet(old_psr); x++;
+
+    return result;
+}
+
 void spawnSyscall(USLOSS_Sysargs *args) {   // FIXME Error with running in kernel mode when it shouldn't be
     //USLOSS_Console("Now in spawn\n");
     int old_psr = lockUserModeMBox();
 
-    int newPID = spork((char *)args->arg5, (int(*)(void *))args->arg1, args->arg2, (int)args->arg3, (int)args->arg4);
+    MboxSend(spawnTrampolineMBoxID, NULL, 0);
+    trampolineFunc = (int(*)(void *))args->arg1;
+    int newPID = spork((char *)args->arg5, userModeTrampoline, args->arg2, (int)args->arg3, (int)args->arg4);
+    MboxRecv(spawnTrampolineMBoxID, NULL, 0);
 
     args->arg1 = (void *)newPID;
     if (newPID >= 0) {
@@ -128,6 +150,7 @@ void phase3_init() {
     systemCallVec[SYS_DUMPPROCESSES] = (void (*)(USLOSS_Sysargs *))dumpProcesses;
 
     userModeMBoxID = MboxCreate(1, 0);
+    spawnTrampolineMBoxID = MboxCreate(1, 0);
     //waitingMBoxID = MboxCreate(1, 0);
     //terminatingMBoxID = MboxCreate(1, 0);
 
