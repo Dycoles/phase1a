@@ -13,7 +13,7 @@
 int userModeMBoxID;
 int spawnTrampolineMBoxID;
 int(*trampolineFunc)(void *);
-int semaphores[MAXSEMS];
+int semaphoreList[MAXSEMS];
 int curSem;
 
 int lockUserModeMBox() {
@@ -39,7 +39,7 @@ void unlockUserModeMBox(int old_psr) {
 int userModeTrampoline(void *arg) {
     //USLOSS_Console("In trampoline: %d\n", USLOSS_PsrGet());
     int old_psr = USLOSS_PsrGet();
-    if (USLOSS_PsrSet(old_psr & ~USLOSS_PSR_CURRENT_MODE) != 0) {
+    if (USLOSS_PsrSet(old_psr & ~USLOSS_PSR_CURRENT_MODE) != USLOSS_DEV_OK) {
         USLOSS_Console("%d\t", USLOSS_PsrGet());
         USLOSS_Console("1 ERROR: cannot disable interrupts in user mode\n");
         USLOSS_Halt(1);
@@ -47,23 +47,27 @@ int userModeTrampoline(void *arg) {
 
     int result = trampolineFunc(arg);
 
+    int x = USLOSS_PsrSet(old_psr); x++;
     if ((USLOSS_PsrGet() & USLOSS_PSR_CURRENT_MODE) == 0) {
         USLOSS_Console("%d\t", USLOSS_PsrGet());
         USLOSS_Console("2 ERROR: cannot enable interrupts in user mode\n");
     }
-    int x = USLOSS_PsrSet(old_psr); x++;
 
     return result;
 }
 
 void spawnSyscall(USLOSS_Sysargs *args) {   // FIXME Error with running in kernel mode when it shouldn't be
-    //USLOSS_Console("Now in spawn\n");
+    //USLOSS_Console("Top of spawn: %s %lu\n", (char *)args->arg5, (unsigned long)trampolineFunc);
+    //USLOSS_Console("Now in spawn: %d\n", USLOSS_PsrGet());
     //int old_psr = lockUserModeMBox();
 
+    // FIXME An error with test23: spork doesn't immediately call the startfunc, and another spawn immediately after overwrites it
     MboxSend(spawnTrampolineMBoxID, NULL, 0);
     trampolineFunc = (int(*)(void *))args->arg1;
+    //USLOSS_Console("In spawn: %s %lu\n", (char *)args->arg5, (unsigned long)trampolineFunc);
     int newPID = spork((char *)args->arg5, userModeTrampoline, args->arg2, (int)args->arg3, (int)args->arg4);
     MboxRecv(spawnTrampolineMBoxID, NULL, 0);
+    //USLOSS_Console("After mbox in spawn: %s\n", (char *)args->arg5);
 
     args->arg1 = (void *)newPID;
     if (newPID >= 0) {
@@ -77,14 +81,17 @@ void spawnSyscall(USLOSS_Sysargs *args) {   // FIXME Error with running in kerne
 }
 
 void waitSyscall(USLOSS_Sysargs *args) {
-    //USLOSS_Console("Now in wait\n");
+    //USLOSS_Console("Now in wait: %d\n", USLOSS_PsrGet());
     //int old_psr = lockUserModeMBox();
 
     int status;
-    MboxSend(spawnTrampolineMBoxID, NULL, 0);
-    trampolineFunc = join;
     int retVal = join(&status);
-    MboxRecv(spawnTrampolineMBoxID, NULL, 0);
+    //MboxSend(spawnTrampolineMBoxID, NULL, 0);
+    //trampolineFunc = join;
+    //USLOSS_Console("Before Join\n");
+    //int retVal = userModeTrampoline(&status);
+    //USLOSS_Console("After Join\n");
+    //MboxRecv(spawnTrampolineMBoxID, NULL, 0);
 
     args->arg1 = (void *) retVal;
     args->arg2 = (void *) status;
@@ -104,10 +111,14 @@ void terminateSyscall(USLOSS_Sysargs *args) {
 
     int quitStatus = args->arg1;
     int joinStatus;
-    //USLOSS_Console("Before Terminate Loop\n");
-    while (args->arg4 != -2) {
-        //USLOSS_Console("In Terminate Loop\n");
-        waitSyscall(args);
+    int retVal;
+    //USLOSS_Console("Before Terminate Loop: %d\n", USLOSS_PsrGet());
+    while (retVal != -2) {
+        //USLOSS_Console("In Terminate Loop: %d\n", joinStatus);
+        
+        retVal = join(&joinStatus);
+        //USLOSS_Console("%d\n", retVal);
+        //waitSyscall(args);
     }
     //USLOSS_Console("In Post-Loop Terminate\n");
     quit(quitStatus);
@@ -121,7 +132,7 @@ void semCreateSyscall(USLOSS_Sysargs *args) {
     if (curSem >= MAXSEMS || args->arg1 < 0) {
         args->arg4 = -1;
     } else {
-        semaphores[curSem] = args->arg1;
+        semaphoreList[curSem] = args->arg1;
         args->arg1 = curSem++;
         args->arg4 = 0;
     }
@@ -148,6 +159,18 @@ int kernSemV(int semaphore) {
     //USLOSS_Console("Now in kern V\n");
 }
 
+void getTimeOfDaySyscall(USLOSS_Sysargs *args) {
+    args->arg1 = currentTime();
+}
+
+void getPidSyscall(USLOSS_Sysargs *args) {
+    args->arg1 = getpid();
+}
+
+void dumpProcessesSyscall() {
+    dumpProcesses();
+}
+
 
 
 
@@ -155,14 +178,14 @@ void phase3_init() {
     systemCallVec[SYS_SPAWN] = (void (*)(USLOSS_Sysargs *))spawnSyscall;
     systemCallVec[SYS_WAIT] = (void (*)(USLOSS_Sysargs *))waitSyscall;
     systemCallVec[SYS_TERMINATE] = (void (*)(USLOSS_Sysargs *))terminateSyscall;
-    systemCallVec[SYS_GETTIMEOFDAY] = (void (*)(USLOSS_Sysargs *))currentTime;
-    systemCallVec[SYS_GETPID] = (void (*)(USLOSS_Sysargs *))getpid;
+    systemCallVec[SYS_GETTIMEOFDAY] = (void (*)(USLOSS_Sysargs *))getTimeOfDaySyscall;
+    systemCallVec[SYS_GETPID] = (void (*)(USLOSS_Sysargs *))getPidSyscall;
     systemCallVec[SYS_SEMCREATE] = (void (*)(USLOSS_Sysargs *))semCreateSyscall;
     systemCallVec[SYS_SEMP] = (void (*)(USLOSS_Sysargs *))semPSyscall;
     systemCallVec[SYS_SEMV] = (void (*)(USLOSS_Sysargs *))semVSyscall;
     //systemCallVec[SYS_SEMFREE] = (void (*)(USLOSS_Sysargs *));
     // TODO Maybe add kern sem funs?
-    systemCallVec[SYS_DUMPPROCESSES] = (void (*)(USLOSS_Sysargs *))dumpProcesses;
+    systemCallVec[SYS_DUMPPROCESSES] = (void (*)(USLOSS_Sysargs *))dumpProcessesSyscall;
 
     userModeMBoxID = MboxCreate(1, 0);
     spawnTrampolineMBoxID = MboxCreate(1, 0);
@@ -171,7 +194,7 @@ void phase3_init() {
 
     curSem = 0;
     for (int i = 0; i < MAXSEMS; i++) {
-        semaphores[i] = -1;
+        semaphoreList[i] = -1;
     }
 }
 
