@@ -37,16 +37,19 @@ void unlockUserModeMBox(int old_psr) {
 }
 
 int userModeTrampoline(void *arg) {
+    //USLOSS_Console("In trampoline: %d\n", USLOSS_PsrGet());
     int old_psr = USLOSS_PsrGet();
-    if (USLOSS_PsrSet(old_psr & ~1) != 0) {
-        USLOSS_Console("ERROR: cannot disable interrupts in user mode\n");
+    if (USLOSS_PsrSet(old_psr & ~USLOSS_PSR_CURRENT_MODE) != 0) {
+        USLOSS_Console("%d\t", USLOSS_PsrGet());
+        USLOSS_Console("1 ERROR: cannot disable interrupts in user mode\n");
         USLOSS_Halt(1);
     }
 
     int result = trampolineFunc(arg);
 
     if ((USLOSS_PsrGet() & USLOSS_PSR_CURRENT_MODE) == 0) {
-        USLOSS_Console("ERROR: cannot enable interrupts in user mode\n");
+        USLOSS_Console("%d\t", USLOSS_PsrGet());
+        USLOSS_Console("2 ERROR: cannot enable interrupts in user mode\n");
     }
     int x = USLOSS_PsrSet(old_psr); x++;
 
@@ -55,7 +58,7 @@ int userModeTrampoline(void *arg) {
 
 void spawnSyscall(USLOSS_Sysargs *args) {   // FIXME Error with running in kernel mode when it shouldn't be
     //USLOSS_Console("Now in spawn\n");
-    int old_psr = lockUserModeMBox();
+    //int old_psr = lockUserModeMBox();
 
     MboxSend(spawnTrampolineMBoxID, NULL, 0);
     trampolineFunc = (int(*)(void *))args->arg1;
@@ -69,16 +72,19 @@ void spawnSyscall(USLOSS_Sysargs *args) {   // FIXME Error with running in kerne
         args->arg4 = (void *)-1;
     }
 
-    unlockUserModeMBox(old_psr);
+    //unlockUserModeMBox(old_psr);
     //USLOSS_Console("End of innerSpawn\n");
 }
 
-int waitSyscall(USLOSS_Sysargs *args) {
+void waitSyscall(USLOSS_Sysargs *args) {
     //USLOSS_Console("Now in wait\n");
-    int old_psr = lockUserModeMBox();
+    //int old_psr = lockUserModeMBox();
 
     int status;
+    MboxSend(spawnTrampolineMBoxID, NULL, 0);
+    trampolineFunc = join;
     int retVal = join(&status);
+    MboxRecv(spawnTrampolineMBoxID, NULL, 0);
 
     args->arg1 = (void *) retVal;
     args->arg2 = (void *) status;
@@ -88,19 +94,28 @@ int waitSyscall(USLOSS_Sysargs *args) {
         args->arg4 = (void *) 0;
     }
 
-    unlockUserModeMBox(old_psr);
+    //unlockUserModeMBox(old_psr);
     //USLOSS_Console("End of innerWait\n");
 }
 
 void terminateSyscall(USLOSS_Sysargs *args) {
     //USLOSS_Console("Now in terminate\n");
-    int old_psr = lockUserModeMBox();
-    USLOSS_Halt(0); // FIXME Should wait for all children before terminating
+    //int old_psr = lockUserModeMBox();
+
+    int quitStatus = args->arg1;
+    int joinStatus;
+    //USLOSS_Console("Before Terminate Loop\n");
+    while (args->arg4 != -2) {
+        //USLOSS_Console("In Terminate Loop\n");
+        waitSyscall(args);
+    }
+    //USLOSS_Console("In Post-Loop Terminate\n");
+    quit(quitStatus);
 }
 
 void semCreateSyscall(USLOSS_Sysargs *args) {
     //USLOSS_Console("Now in create\n");
-    int old_psr = lockUserModeMBox();
+    //int old_psr = lockUserModeMBox();
     
     // If out of semaphores or invalid input, return error:
     if (curSem >= MAXSEMS || args->arg1 < 0) {
@@ -111,7 +126,7 @@ void semCreateSyscall(USLOSS_Sysargs *args) {
         args->arg4 = 0;
     }
 
-    unlockUserModeMBox(old_psr);
+    //unlockUserModeMBox(old_psr);
 }
 
 void semPSyscall(USLOSS_Sysargs *args) {
