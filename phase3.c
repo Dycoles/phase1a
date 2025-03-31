@@ -9,12 +9,16 @@
 #include <assert.h>
 #include <stdlib.h>
 #include <stdio.h>
+typedef struct {
+    int value;
+    int blockedMbox;
+} Semaphore;
 
 int userModeMBoxID;
 int spawnTrampolineMBoxID;
 int(*trampolineFunc)(void *);
-int semaphoreList[MAXSEMS];
-int curSem;
+Semaphore semaphoreList[MAXSEMS];
+int curSem = 0;
 
 int lockUserModeMBox() {
     MboxSend(userModeMBoxID, NULL, 0);
@@ -37,7 +41,7 @@ void unlockUserModeMBox(int old_psr) {
 }
 
 int userModeTrampoline(void *arg) {
-    //USLOSS_Console("In trampoline: %d\n", USLOSS_PsrGet());
+    // USLOSS_Console("In trampoline: %d\n", USLOSS_PsrGet());
     int old_psr = USLOSS_PsrGet();
     if (USLOSS_PsrSet(old_psr & ~USLOSS_PSR_CURRENT_MODE) != USLOSS_DEV_OK) {
         USLOSS_Console("%d\t", USLOSS_PsrGet());
@@ -46,27 +50,30 @@ int userModeTrampoline(void *arg) {
     }
 
     int result = trampolineFunc(arg);
-
+    // USLOSS_Console("Result %d received from trampoline\n", result);
+    Terminate(result);
     int x = USLOSS_PsrSet(old_psr); x++;
     if ((USLOSS_PsrGet() & USLOSS_PSR_CURRENT_MODE) == 0) {
         USLOSS_Console("%d\t", USLOSS_PsrGet());
         USLOSS_Console("2 ERROR: cannot enable interrupts in user mode\n");
     }
-
+    // USLOSS_Console("End Trampoline, return restult\n");
     return result;
 }
 
 void spawnSyscall(USLOSS_Sysargs *args) {   // FIXME Error with running in kernel mode when it shouldn't be
-    //USLOSS_Console("Top of spawn: %s %lu\n", (char *)args->arg5, (unsigned long)trampolineFunc);
+    // USLOSS_Console("Top of spawn: %s %lu\n", (char *)args->arg5, (unsigned long)trampolineFunc);
     //USLOSS_Console("Now in spawn: %d\n", USLOSS_PsrGet());
     //int old_psr = lockUserModeMBox();
 
     // FIXME An error with test23: spork doesn't immediately call the startfunc, and another spawn immediately after overwrites it
     MboxSend(spawnTrampolineMBoxID, NULL, 0);
     trampolineFunc = (int(*)(void *))args->arg1;
-    //USLOSS_Console("In spawn: %s %lu\n", (char *)args->arg5, (unsigned long)trampolineFunc);
+    // USLOSS_Console("Sporking\n");
     int newPID = spork((char *)args->arg5, userModeTrampoline, args->arg2, (int)args->arg3, (int)args->arg4);
+    // USLOSS_Console("After Spork\n");
     MboxRecv(spawnTrampolineMBoxID, NULL, 0);
+    // USLOSS_Console("After Receive\n");
     //USLOSS_Console("After mbox in spawn: %s\n", (char *)args->arg5);
 
     args->arg1 = (void *)newPID;
@@ -77,11 +84,11 @@ void spawnSyscall(USLOSS_Sysargs *args) {   // FIXME Error with running in kerne
     }
 
     //unlockUserModeMBox(old_psr);
-    //USLOSS_Console("End of innerSpawn\n");
+    // USLOSS_Console("End of innerSpawn\n");
 }
 
 void waitSyscall(USLOSS_Sysargs *args) {
-    //USLOSS_Console("Now in wait: %d\n", USLOSS_PsrGet());
+    // USLOSS_Console("Now in wait: %d\n", USLOSS_PsrGet());
     //int old_psr = lockUserModeMBox();
 
     int status;
@@ -102,11 +109,11 @@ void waitSyscall(USLOSS_Sysargs *args) {
     }
 
     //unlockUserModeMBox(old_psr);
-    //USLOSS_Console("End of innerWait\n");
+    // USLOSS_Console("End of innerWait\n");
 }
 
 void terminateSyscall(USLOSS_Sysargs *args) {
-    //USLOSS_Console("Now in terminate\n");
+    // USLOSS_Console("Now in terminate\n");
     //int old_psr = lockUserModeMBox();
 
     int quitStatus = args->arg1;
@@ -120,7 +127,7 @@ void terminateSyscall(USLOSS_Sysargs *args) {
         //USLOSS_Console("%d\n", retVal);
         //waitSyscall(args);
     }
-    //USLOSS_Console("In Post-Loop Terminate\n");
+    // USLOSS_Console("In Post-Loop Terminate\n");
     quit(quitStatus);
 }
 
@@ -132,20 +139,48 @@ void semCreateSyscall(USLOSS_Sysargs *args) {
     if (curSem >= MAXSEMS || args->arg1 < 0) {
         args->arg4 = -1;
     } else {
-        semaphoreList[curSem] = args->arg1;
+        semaphoreList[curSem].value = args->arg1;
+        semaphoreList[curSem].blockedMbox = MboxCreate(0, 0);
         args->arg1 = curSem++;
         args->arg4 = 0;
     }
-
     //unlockUserModeMBox(old_psr);
 }
 
 void semPSyscall(USLOSS_Sysargs *args) {
     //USLOSS_Console("Now in P\n");
+    // arg 1 is ID of semaphor; validate ID
+    if (curSem >= MAXSEMS || args->arg1 < 0) {
+        args->arg4 = -1;
+    } else {
+        args->arg4 = 0;
+        int semID = (int)(long)args->arg1;
+        // if counter is zero, block until nonzero
+        if (semaphoreList[semID].value == 0) {
+            // USLOSS_Console("SemP Blocking until nonzero\n");
+            MboxSend(semaphoreList[semID].blockedMbox, NULL, 0);
+        }
+        // then decrement
+        // USLOSS_Console("SemP Decrementing semaphore list\n");
+        semaphoreList[semID].value--;
+    }
 }
 
 void semVSyscall(USLOSS_Sysargs *args) {
     //USLOSS_Console("Now in V\n");
+    if (curSem >= MAXSEMS || args->arg1 < 0) {
+        args->arg4 = -1;
+    } else {
+        args->arg4 = 0;
+        int semID = (int)(long)args->arg1;
+        // increment counter
+        // USLOSS_Console("SemV increment counter\n");
+        semaphoreList[semID].value++;
+        // if any P()s are blocked, unblock one
+        if (semaphoreList[semID].value == 1) {
+            MboxRecv(semaphoreList[semID].blockedMbox, NULL, 0);
+        }
+    }
 }
 
 // FIXME Kern funs added so it compiles. Unsure what needs to be done for these.
@@ -194,7 +229,8 @@ void phase3_init() {
 
     curSem = 0;
     for (int i = 0; i < MAXSEMS; i++) {
-        semaphoreList[i] = -1;
+        semaphoreList[i].value = -1;
+        semaphoreList[i].blockedMbox = -1;
     }
 }
 
