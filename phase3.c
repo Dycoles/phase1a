@@ -29,24 +29,18 @@ int nextTrampID = 0;
 Semaphore semaphoreList[MAXSEMS];
 int curSem = 0;
 
-int lockUserModeMBox() {
-    MboxSend(userModeMBoxID, NULL, 0);
-    int old_psr = USLOSS_PsrGet();  // FIXME This may not be allowed
-    // ensure we are in kernel mode
-    if (USLOSS_PsrSet(old_psr & ~USLOSS_PSR_CURRENT_INT) != 0) {
-        USLOSS_Console("ERROR: cannot disable interrupts in user mode\n");
-        USLOSS_Halt(1);
-    }
-    return old_psr;
+void lock() {
+    // acquire the lock
+    // USLOSS_Console("Attempting to acquire lock\n");
+    MboxRecv(userModeMBoxID, NULL, 0);
+    // USLOSS_Console("Lock acquired\n");
 }
 
-void unlockUserModeMBox(int old_psr) {
-    MboxRecv(userModeMBoxID, NULL, 0);
-    if ((USLOSS_PsrGet() & USLOSS_PSR_CURRENT_MODE) == 0) {
-        USLOSS_Console("ERROR: cannot enable interrupts in user mode\n");
-    }
-    // restore interrupts; x used to keep compiler happy
-    int x = USLOSS_PsrSet(old_psr); x++;   // FIXME This may not be allowed
+void unlock() {
+    // release the lock 
+    // USLOSS_Console("Releasing lock\n");
+    MboxSend(userModeMBoxID, NULL, 0);
+    // USLOSS_Console("Lock released\n");
 }
 
 int userModeTrampoline(void *arg) {
@@ -76,7 +70,6 @@ int userModeTrampoline(void *arg) {
 
 void spawnSyscall(USLOSS_Sysargs *args) {
     //int old_psr = lockUserModeMBox();
-
     MboxSend(spawnTrampolineMBoxID, NULL, 0);
     int thisTrampID;
     do {    // FIXME May loop infinitely
@@ -135,7 +128,7 @@ void terminateSyscall(USLOSS_Sysargs *args) {
 
 void semCreateSyscall(USLOSS_Sysargs *args) {
     //int old_psr = lockUserModeMBox();
-    
+    lock();
     // If out of semaphores or invalid input, return error:
     if (curSem >= MAXSEMS || args->arg1 < 0) {
         args->arg4 = (void *)-1;
@@ -147,28 +140,39 @@ void semCreateSyscall(USLOSS_Sysargs *args) {
         args->arg4 = 0;
     }
     //unlockUserModeMBox(old_psr);
+    unlock();
 }
 
 void semPSyscall(USLOSS_Sysargs *args) {
     // arg 1 is ID of semaphor; validate ID
+    lock();
     if (curSem >= MAXSEMS || args->arg1 < 0) {
         args->arg4 = (void *)-1;
+        unlock();
     } else {
         args->arg4 = 0;
         int semID = (int)(long)args->arg1;
         // if counter is zero, block until nonzero
         if (semaphoreList[semID].value == 0) {
             semaphoreList[semID].numBlockedProcs++;
+            // unlock before we block
+            unlock();
             MboxSend(semaphoreList[semID].blockedMbox, NULL, 0);
+            // lock after send unblocks
+            lock();
         }
         // then decrement
         semaphoreList[semID].value--;
+        // unlock after we decrement
+        unlock();
     }
 }
 
 void semVSyscall(USLOSS_Sysargs *args) {
+    lock();
     if (curSem >= MAXSEMS || args->arg1 < 0) {
         args->arg4 = (void *)-1;
+        unlock();
     } else {
         args->arg4 = 0;
         int semID = (int)(long)args->arg1;
@@ -176,9 +180,12 @@ void semVSyscall(USLOSS_Sysargs *args) {
         semaphoreList[semID].value++;
         // if any P()s are blocked, unblock one
         if (semaphoreList[semID].numBlockedProcs >= 1) {
+            unlock();
             MboxRecv(semaphoreList[semID].blockedMbox, NULL, 0);
+            lock();
             semaphoreList[semID].numBlockedProcs--;
         }
+        unlock();
     }
 }
 
@@ -226,6 +233,8 @@ void phase3_init() {
     systemCallVec[SYS_DUMPPROCESSES] = (void (*)(USLOSS_Sysargs *))dumpProcessesSyscall;
 
     userModeMBoxID = MboxCreate(1, 0);
+    // make lock available
+    MboxSend(userModeMBoxID, NULL, 0);
     spawnTrampolineMBoxID = MboxCreate(1, 0);
 
     curSem = 0;
