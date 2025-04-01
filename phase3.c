@@ -12,6 +12,7 @@
 typedef struct {
     int value;
     int blockedMbox;
+    int numBlockedProcs;
 } Semaphore;
 
 typedef struct {
@@ -161,6 +162,7 @@ void semCreateSyscall(USLOSS_Sysargs *args) {
     } else {
         semaphoreList[curSem].value = args->arg1;
         semaphoreList[curSem].blockedMbox = MboxCreate(0, 0);
+        semaphoreList[curSem].numBlockedProcs = 0;
         args->arg1 = curSem++;
         args->arg4 = 0;
     }
@@ -178,10 +180,11 @@ void semPSyscall(USLOSS_Sysargs *args) {
         // if counter is zero, block until nonzero
         if (semaphoreList[semID].value == 0) {
             // USLOSS_Console("SemP Blocking until nonzero\n");
+            semaphoreList[semID].numBlockedProcs++;
             MboxSend(semaphoreList[semID].blockedMbox, NULL, 0);
         }
         // then decrement
-        // USLOSS_Console("SemP Decrementing semaphore list\n");
+        // USLOSS_Console("SemP Decrementing semaphore list: %d\n", semaphoreList[semID].value);
         semaphoreList[semID].value--;
     }
 }
@@ -197,10 +200,15 @@ void semVSyscall(USLOSS_Sysargs *args) {
         // USLOSS_Console("SemV increment counter\n");
         semaphoreList[semID].value++;
         // if any P()s are blocked, unblock one
-        if (semaphoreList[semID].value == 1) {
+        if (semaphoreList[semID].numBlockedProcs >= 1) {
+            //USLOSS_Console("Before recv: %d\n", semaphoreList[semID].numBlockedProcs);
             MboxRecv(semaphoreList[semID].blockedMbox, NULL, 0);
+            semaphoreList[semID].numBlockedProcs--;
+            //USLOSS_Console("After recv %d\n", semaphoreList[semID].numBlockedProcs);
         }
     }
+    //USLOSS_Console("End of V: ");
+    //dumpProcesses();
 }
 
 // FIXME Kern funs added so it compiles. Unsure what needs to be done for these.
@@ -251,6 +259,7 @@ void phase3_init() {
     for (int i = 0; i < MAXSEMS; i++) {
         semaphoreList[i].value = -1;
         semaphoreList[i].blockedMbox = -1;
+        semaphoreList[i].numBlockedProcs = -1;
     }
 
     for (int i = 0; i < MAXPROC; i++) {
