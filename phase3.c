@@ -45,32 +45,25 @@ void unlock() {
 
 int userModeTrampoline(void *arg) {
     int old_psr = USLOSS_PsrGet();
+    // set to user mode
     if (USLOSS_PsrSet(old_psr & ~USLOSS_PSR_CURRENT_MODE) != USLOSS_DEV_OK) {
         USLOSS_Console("%d\t", USLOSS_PsrGet());
         USLOSS_Console("1 ERROR: cannot disable interrupts in user mode\n");
         USLOSS_Halt(1);
     }
-
     trampolineFunc *trampArg = (trampolineFunc *)arg;
 
     int trampIndex = trampArg->trampID % MAXPROC;
     int result = trampolineFuncs[trampIndex].func(trampolineFuncs[trampIndex].arg);
     trampolineFuncs[trampIndex].trampID = -1;
-
     Terminate(result);
-
-    int x = USLOSS_PsrSet(old_psr); x++;
-    if ((USLOSS_PsrGet() & USLOSS_PSR_CURRENT_MODE) == 0) {
-        USLOSS_Console("%d\t", USLOSS_PsrGet());
-        USLOSS_Console("2 ERROR: cannot enable interrupts in user mode\n");
-    }
-    
+    // should never get here
     return result;
 }
 
 void spawnSyscall(USLOSS_Sysargs *args) {
     //int old_psr = lockUserModeMBox();
-    MboxSend(spawnTrampolineMBoxID, NULL, 0);
+    lock();
     int thisTrampID;
     do {    // FIXME May loop infinitely
         thisTrampID = nextTrampID++;
@@ -79,28 +72,29 @@ void spawnSyscall(USLOSS_Sysargs *args) {
     trampolineFuncs[thisTrampID%MAXPROC].trampID = thisTrampID;
     trampolineFuncs[thisTrampID%MAXPROC].func = (int(*)(void *))args->arg1;
     trampolineFuncs[thisTrampID%MAXPROC].arg = args->arg2;
-
+    unlock();
+    MboxSend(spawnTrampolineMBoxID, NULL, 0);
     int newPID = spork((char *)args->arg5, userModeTrampoline, (void *)&trampolineFuncs[thisTrampID],
         (int)(long)args->arg3, (int)(long)args->arg4);
-
     MboxRecv(spawnTrampolineMBoxID, NULL, 0);
-
+    lock();
     args->arg1 = (void *)(long)newPID;
     if (newPID >= 0) {
         args->arg4 = (void *)0;
     } else {
         args->arg4 = (void *)-1;
     }
-
+    unlock();
     //unlockUserModeMBox(old_psr);
 }
 
 void waitSyscall(USLOSS_Sysargs *args) {
     //int old_psr = lockUserModeMBox();
-
+    lock();
     int status;
+    unlock();
     int retVal = join(&status);
-
+    lock();
     args->arg1 = (void *)(long)retVal;
     args->arg2 = (void *)(long)status;
     if (retVal == -2) {
@@ -108,21 +102,20 @@ void waitSyscall(USLOSS_Sysargs *args) {
     } else {
         args->arg4 = 0;
     }
-
+    unlock();
     //unlockUserModeMBox(old_psr);
 }
 
 void terminateSyscall(USLOSS_Sysargs *args) {
     //int old_psr = lockUserModeMBox();
-
+    lock();
     int quitStatus = (int)(long)args->arg1;
     int joinStatus;
-    int retVal;
-    
+    int retVal = 0;
+    unlock();
     while (retVal != -2) {
         retVal = join(&joinStatus);
     }
-    
     quit(quitStatus);
 }
 
@@ -150,7 +143,6 @@ void semPSyscall(USLOSS_Sysargs *args) {
         args->arg4 = (void *)-1;
         unlock();
     } else {
-        args->arg4 = 0;
         int semID = (int)(long)args->arg1;
         // if counter is zero, block until nonzero
         if (semaphoreList[semID].value == 0) {
@@ -163,6 +155,7 @@ void semPSyscall(USLOSS_Sysargs *args) {
         }
         // then decrement
         semaphoreList[semID].value--;
+        args->arg4 = 0;
         // unlock after we decrement
         unlock();
     }
@@ -174,17 +167,17 @@ void semVSyscall(USLOSS_Sysargs *args) {
         args->arg4 = (void *)-1;
         unlock();
     } else {
-        args->arg4 = 0;
         int semID = (int)(long)args->arg1;
         // increment counter
         semaphoreList[semID].value++;
         // if any P()s are blocked, unblock one
-        if (semaphoreList[semID].numBlockedProcs >= 1) {
+        if (semaphoreList[semID].numBlockedProcs > 0) {
             unlock();
             MboxRecv(semaphoreList[semID].blockedMbox, NULL, 0);
             lock();
             semaphoreList[semID].numBlockedProcs--;
         }
+        args->arg4 = 0;
         unlock();
     }
 }
