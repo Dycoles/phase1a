@@ -14,9 +14,16 @@ typedef struct {
     int blockedMbox;
 } Semaphore;
 
+typedef struct {
+    int trampID;
+    int(*func)(void *);
+    void *arg;
+} trampolineFunc;
+
 int userModeMBoxID;
 int spawnTrampolineMBoxID;
-int(*trampolineFunc)(void *);
+trampolineFunc trampolineFuncs[MAXPROC];
+int nextTrampID = 0;
 Semaphore semaphoreList[MAXSEMS];
 int curSem = 0;
 
@@ -49,7 +56,12 @@ int userModeTrampoline(void *arg) {
         USLOSS_Halt(1);
     }
 
-    int result = trampolineFunc(arg);
+    trampolineFunc *trampArg = (trampolineFunc *)arg;
+
+    int trampIndex = trampArg->trampID%MAXPROC;
+    int result = trampolineFuncs[trampIndex].func(trampolineFuncs[trampIndex].arg);
+    trampolineFuncs[trampIndex].trampID = -1;
+
     // USLOSS_Console("Result %d received from trampoline\n", result);
     Terminate(result);
     int x = USLOSS_PsrSet(old_psr); x++;
@@ -68,9 +80,17 @@ void spawnSyscall(USLOSS_Sysargs *args) {   // FIXME Error with running in kerne
 
     // FIXME An error with test23: spork doesn't immediately call the startfunc, and another spawn immediately after overwrites it
     MboxSend(spawnTrampolineMBoxID, NULL, 0);
-    trampolineFunc = (int(*)(void *))args->arg1;
+    int thisTrampID;
+    do {    // FIXME May loop infinitely
+        thisTrampID = nextTrampID++;
+    } while (trampolineFuncs[thisTrampID%MAXPROC].trampID >= 0);
+
+    trampolineFuncs[thisTrampID%MAXPROC].trampID = thisTrampID;
+    trampolineFuncs[thisTrampID%MAXPROC].func = (int(*)(void *))args->arg1;
+    trampolineFuncs[thisTrampID%MAXPROC].arg = args->arg2;
+
     // USLOSS_Console("Sporking\n");
-    int newPID = spork((char *)args->arg5, userModeTrampoline, args->arg2, (int)args->arg3, (int)args->arg4);
+    int newPID = spork((char *)args->arg5, userModeTrampoline, (void *)&trampolineFuncs[thisTrampID], (int)args->arg3, (int)args->arg4);
     // USLOSS_Console("After Spork\n");
     MboxRecv(spawnTrampolineMBoxID, NULL, 0);
     // USLOSS_Console("After Receive\n");
@@ -231,6 +251,12 @@ void phase3_init() {
     for (int i = 0; i < MAXSEMS; i++) {
         semaphoreList[i].value = -1;
         semaphoreList[i].blockedMbox = -1;
+    }
+
+    for (int i = 0; i < MAXPROC; i++) {
+        trampolineFuncs[i].trampID = -1;
+        trampolineFuncs[i].func = NULL;
+        trampolineFuncs[i].arg = NULL;
     }
 }
 
