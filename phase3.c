@@ -12,8 +12,10 @@
 #include <stdio.h>
 typedef struct {
     int value;
-    int blockedMbox;
     int numBlockedProcs;
+    int blockedMbox[MAXMBOX];
+    int front;
+    int back;
 } Semaphore;
 
 typedef struct {
@@ -127,8 +129,9 @@ void semCreateSyscall(USLOSS_Sysargs *args) {
         args->arg4 = (void *)-1;
     } else {
         semaphoreList[curSem].value = (int)(long)args->arg1;
-        semaphoreList[curSem].blockedMbox = MboxCreate(0, 0);
         semaphoreList[curSem].numBlockedProcs = 0;
+        semaphoreList[curSem].front = 0;
+        semaphoreList[curSem].back = 0;
         args->arg1 = (void *)(long)curSem++;
         args->arg4 = 0;
     }
@@ -145,11 +148,16 @@ void semPSyscall(USLOSS_Sysargs *args) {
     } else {
         int semID = (int)(long)args->arg1;
         // if counter is zero, block until nonzero
+        int back = semaphoreList[semID].back;
+        int mbox = MboxCreate(0, 0);
         if (semaphoreList[semID].value == 0) {
+            // add process to block queue to keep track of which order processes should unblock later
+            semaphoreList[semID].blockedMbox[back] = mbox;
+            semaphoreList[semID].back = (back + 1) % MAXMBOX;
             semaphoreList[semID].numBlockedProcs++;
             // unlock before we block
             unlock();
-            MboxSend(semaphoreList[semID].blockedMbox, NULL, 0);
+            MboxSend(mbox, NULL, 0);
             // lock after send unblocks
             lock();
         }
@@ -168,12 +176,15 @@ void semVSyscall(USLOSS_Sysargs *args) {
         unlock();
     } else {
         int semID = (int)(long)args->arg1;
+        int front = semaphoreList[semID].front;
         // increment counter
         semaphoreList[semID].value++;
         // if any P()s are blocked, unblock one
         if (semaphoreList[semID].numBlockedProcs > 0) {
+            int mbox = semaphoreList[semID].blockedMbox[front];
+            semaphoreList[semID].front = (front + 1) % MAXMBOX;
             unlock();
-            MboxRecv(semaphoreList[semID].blockedMbox, NULL, 0);
+            MboxRecv(mbox, NULL, 0);
             lock();
             semaphoreList[semID].numBlockedProcs--;
         }
@@ -209,9 +220,6 @@ void dumpProcessesSyscall() {
     dumpProcesses();
 }
 
-
-
-
 void phase3_init() {
     systemCallVec[SYS_SPAWN] = (void (*)(USLOSS_Sysargs *))spawnSyscall;
     systemCallVec[SYS_WAIT] = (void (*)(USLOSS_Sysargs *))waitSyscall;
@@ -233,8 +241,9 @@ void phase3_init() {
     curSem = 0;
     for (int i = 0; i < MAXSEMS; i++) {
         semaphoreList[i].value = -1;
-        semaphoreList[i].blockedMbox = -1;
         semaphoreList[i].numBlockedProcs = -1;
+        semaphoreList[i].front = -1;
+        semaphoreList[i].back = -1;
     }
 
     for (int i = 0; i < MAXPROC; i++) {
