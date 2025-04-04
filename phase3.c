@@ -135,105 +135,109 @@ void terminateSyscall(USLOSS_Sysargs *args) {
 }
 
 void semCreateSyscall(USLOSS_Sysargs *args) {
-    lock();
-
-    // If out of semaphores or invalid input, return error:
-    if (curSem >= MAXSEMS || args->arg1 < 0) {
-        args->arg4 = (void *)-1;
-    } else {
-        // Set up the new semaphore:
-        semaphoreList[curSem].value = (int)(long)args->arg1;
-        semaphoreList[curSem].numBlockedProcs = 0;
-        semaphoreList[curSem].front = 0;
-        semaphoreList[curSem].back = 0;
-
-        // Set the return values:
-        args->arg1 = (void *)(long)curSem++;
+    int semID;
+    int result = kernSemCreate((int)(long)args->arg1, &semID);
+    if (result == 0) {
+        args->arg1 = (void *)(long)semID;
         args->arg4 = 0;
+    } else {
+        args->arg4 = (void *)-1;
     }
-    
-    unlock();
 }
 
 void semPSyscall(USLOSS_Sysargs *args) {
-    lock();
-
-    // Validate the semaphore ID (arg1):
-    if (curSem >= MAXSEMS || args->arg1 < 0) {
-        args->arg4 = (void *)-1;
+    int result = kernSemP((int)(long)args->arg1);
+    if (result == 0) {
+        args->arg4 = 0;
     } else {
-        int semID = (int)(long)args->arg1;
-
-        // Get the semaphore to P(). If counter is zero, block until non-zero:
-        int back = semaphoreList[semID].back;
-        if (semaphoreList[semID].value == 0) {
-            int mbox = MboxCreate(0, 0);    // Mailbox to block on
-
-            // Add process to block queue to keep track of the order in which processes should unblock later:
-            semaphoreList[semID].blockedMbox[back] = mbox;
-            semaphoreList[semID].back = (back + 1) % MAXMBOX;
-            semaphoreList[semID].numBlockedProcs++;
-
-            // Block until this semaphore gets V()ed:
-            unlock();   // unlock before we block
-            MboxSend(mbox, NULL, 0);
-            MboxRelease(mbox);
-            lock(); // re-lock after send unblocks
-        }
-
-        // Decrement the semaphore value:
-        semaphoreList[semID].value--;
-
-        args->arg4 = 0; // return val
+        args->arg4 = (void *)-1;
     }
-
-    unlock();
 }
 
 void semVSyscall(USLOSS_Sysargs *args) {
-    lock();
-
-    // If invalid input, return error:
-    if (curSem >= MAXSEMS || args->arg1 < 0) {
-        args->arg4 = (void *)-1;
+    int result = kernSemV((int)(long)args->arg1);
+    if (result == 0) {
+        args->arg4 = 0;
     } else {
-        int semID = (int)(long)args->arg1;
-
-        // Get the next semaphore and increment it:
-        int front = semaphoreList[semID].front;
-        semaphoreList[semID].value++;
-
-        // if any P()s are blocked, unblock one
-        if (semaphoreList[semID].numBlockedProcs > 0) {
-            // Get the appropriate mailbox and receive on it:
-            int mbox = semaphoreList[semID].blockedMbox[front];
-            semaphoreList[semID].front = (front + 1) % MAXMBOX;
-
-            unlock();
-            MboxRecv(mbox, NULL, 0);
-            lock();
-
-            semaphoreList[semID].numBlockedProcs--;
-        }
-
-        args->arg4 = 0; // return value
+        args->arg4 = (void *)-1;
     }
-
-    unlock();
 }
 
 // FIXME Kern funs added so it compiles. Unsure what needs to be done for these.
 int kernSemCreate(int value, int *semaphore) {
-    /*if ((USLOSS_PsrGet() & USLOSS_PSR_CURRENT_MODE) == 0) {
-        USLOSS_Console("ERROR: Someone attempted to call kernSemCreate while in user mode!\n");
-        USLOSS_Halt(1);
-    }*/
-   return 0;
-}
-int kernSemP(int semaphore) {
+    lock();
+    // If out of semaphores or invalid input, return error:
+    if (curSem >= MAXSEMS || value < 0) {
+        unlock();
+        return -1;
+    }
+    // Set up the new semaphore:
+    semaphoreList[curSem].value = value;
+    semaphoreList[curSem].numBlockedProcs = 0;
+    semaphoreList[curSem].front = 0;
+    semaphoreList[curSem].back = 0;
+
+    *semaphore = curSem++; 
+    unlock();
     return 0;
 }
+
+int kernSemP(int semaphore) {
+    lock();
+    // Validate the semaphore ID (arg1):
+    if (semaphore < 0 || semaphore >= curSem) {
+        unlock();
+        return -1;
+    }
+    // Get the semaphore to P(). If counter is zero, block until non-zero:
+    if (semaphoreList[semaphore].value == 0) {
+        int mbox = MboxCreate(0, 0);
+        int back = semaphoreList[semaphore].back;
+        // Add process to block queue to keep track of the order in which processes should unblock later:
+        semaphoreList[semaphore].blockedMbox[back] = mbox;
+        semaphoreList[semaphore].back = (back + 1) % MAXMBOX;
+        semaphoreList[semaphore].numBlockedProcs++;
+        // release the lock
+        unlock(); 
+        // Block until this semaphore gets V()ed:
+        MboxSend(mbox, NULL, 0);
+        // release the mailbox so we don't take up space
+        MboxRelease(mbox); 
+        // reacquire the lock
+        lock(); 
+    }
+    // Decrement the semaphore value:
+    semaphoreList[semaphore].value--;
+
+    unlock();
+    return 0;
+}
+
 int kernSemV(int semaphore) {
+    lock();
+    // If invalid input, return error:
+    if (semaphore < 0 || semaphore >= curSem) {
+        unlock();
+        return -1;
+    }
+    // increment value
+    semaphoreList[semaphore].value++;
+    // if any P()s are blocked, unblock one
+    if (semaphoreList[semaphore].numBlockedProcs > 0) {
+        // Get the next semaphore and increment it:
+        int front = semaphoreList[semaphore].front;
+        // get the mailbox
+        int mbox = semaphoreList[semaphore].blockedMbox[front];
+        semaphoreList[semaphore].front = (front + 1) % MAXMBOX;
+        semaphoreList[semaphore].numBlockedProcs--;
+
+        unlock();
+        // wake up blocked process
+        MboxRecv(mbox, NULL, 0);
+        lock();
+    }
+
+    unlock();
     return 0;
 }
 
