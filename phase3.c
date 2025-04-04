@@ -149,8 +149,8 @@ void semPSyscall(USLOSS_Sysargs *args) {
         int semID = (int)(long)args->arg1;
         // if counter is zero, block until nonzero
         int back = semaphoreList[semID].back;
-        int mbox = MboxCreate(0, 0);
         if (semaphoreList[semID].value == 0) {
+            int mbox = MboxCreate(0, 0);
             // add process to block queue to keep track of which order processes should unblock later
             semaphoreList[semID].blockedMbox[back] = mbox;
             semaphoreList[semID].back = (back + 1) % MAXMBOX;
@@ -158,6 +158,7 @@ void semPSyscall(USLOSS_Sysargs *args) {
             // unlock before we block
             unlock();
             MboxSend(mbox, NULL, 0);
+            MboxRelease(mbox);
             // lock after send unblocks
             lock();
         }
