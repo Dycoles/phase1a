@@ -101,8 +101,19 @@ void spawnSyscall(USLOSS_Sysargs *args) {
 
     // Find an available trampoline func struct:
     int thisTrampID;
-    do {    // FIXME May loop infinitely
+    int attemptsMade = 0;
+    do {
         thisTrampID = nextTrampID++;
+
+        // If out of trampolineFuncs, return error:
+        attemptsMade++;
+        if (attemptsMade > MAXPROC) {
+            USLOSS_Console("ERROR: No available slots for trampoline function. Should never see this.");
+            args->arg1 = NULL;
+            args->arg4 = (void *) -1;
+            unlock();
+            return;
+        }
     } while (trampolineFuncs[thisTrampID%MAXPROC].trampID >= 0);
 
     // Set up the trampoline struct:
@@ -186,12 +197,14 @@ void semCreateSyscall(USLOSS_Sysargs *args) {
     int result = kernSemCreate((int)(long)args->arg1, &semID);
 
     // Set its return values:
+    lock();
     if (result == 0) {
         args->arg1 = (void *)(long)semID;
         args->arg4 = 0;
     } else {
         args->arg4 = (void *)-1;
     }
+    unlock();
 }
 
 /*
@@ -204,11 +217,13 @@ void semPSyscall(USLOSS_Sysargs *args) {
     int result = kernSemP((int)(long)args->arg1);
 
     // Set its return values:
+    lock();
     if (result == 0) {
         args->arg4 = 0;
     } else {
         args->arg4 = (void *)-1;
     }
+    unlock();
 }
 
 /*
@@ -221,11 +236,13 @@ void semVSyscall(USLOSS_Sysargs *args) {
     int result = kernSemV((int)(long)args->arg1);
 
     // Set its return values:
+    lock();
     if (result == 0) {
         args->arg4 = 0;
     } else {
         args->arg4 = (void *)-1;
     }
+    unlock();
 }
 
 /*
@@ -364,8 +381,6 @@ void phase3_init() {
     systemCallVec[SYS_SEMCREATE] = (void (*)(USLOSS_Sysargs *))semCreateSyscall;
     systemCallVec[SYS_SEMP] = (void (*)(USLOSS_Sysargs *))semPSyscall;
     systemCallVec[SYS_SEMV] = (void (*)(USLOSS_Sysargs *))semVSyscall;
-    //systemCallVec[SYS_SEMFREE] = (void (*)(USLOSS_Sysargs *));
-    // TODO Maybe add kern sem funs?
     systemCallVec[SYS_DUMPPROCESSES] = (void (*)(USLOSS_Sysargs *))dumpProcessesSyscall;
 
     // Create the mailboxes used in this program:
@@ -391,9 +406,9 @@ void phase3_init() {
 }
 
 /*
- * TODO
+ * The phase3_start_service_processes() function allows any phase-specific start
+ * services to be initialized. Currently left blank.
  */
 void phase3_start_service_processes() {
     // Deliberately left blank.
-    // TODO Should it be deliberately left blank?
 }
