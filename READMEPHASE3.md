@@ -18,10 +18,10 @@ Child1a(): starting
 As the test case mentions, the run time "should be close, but does not have to be an exact match". Other than
 fast run times, our code should meet specifications here.
 
-Test Case #20: This test case is meant to ensure that we are counting semaphors correctly (it runs 3 Ps and 3Vs).
+Test Case #20: This test case is meant to ensure that we are counting semaphores correctly (it runs 3 Ps and 3Vs).
 The reason for the difference in output is likely due to how we are handling blocking. On the last P, we block until the
 next V. It's possible the test case handles blocking slightly differently, so this last block may be quicker or not happen at
-all, resulting in a slightly delayed start3() print
+all, resulting in a slightly delayed start3() print.
 
  We get this output when running the code:
 
@@ -40,19 +40,20 @@ Start3() prints slightly later than the test case. As the test case comments men
  Child1(): After P attempt #3 -- may appear before: start3(): After V
 +start3(): After V
 
-The child() print prints before start3, which the comment says is OK. We should meet the requirements for this test case
+The child() print prints before start3, which the comment says is OK. We should meet the requirements for this test case.
 
-Test Case #26: This test case is meant to ensure counting semaphores works across 25000 P/V calls, with an extra blocking P call
+Test Case #26: This test case is meant to ensure counting semaphores work across 250000 P/V calls, with an extra blocking P call
 that requires the low-priority process to run in order to unblock that last P for each child. How this process works is Child1
 and Child2 will race for CPU time. Each child will call the child_common_func. This function runs semV 250000 times, then it
-runs semP 250000 times, then it runs semP one more time. Each process will block on its semaphor (sem1 for child 1 and 
+runs semP 250000 times, then it runs semP one more time. Each process will block on its semaphore (sem1 for child 1 and 
 sem2 for child 2). 
 
 Afterwards, once Child1 and Child2 are blocked, LP_Child (the low priority process) will run and call semV(sem1) 
 and semV(sem2) respectively, allowing child1 to unblock followed by child2
 
-Now, 90% of the time, the test case runs and passes correctly. However, sometimes child2 is allocated a bit more CPU time
-than child1, resulting in it finishing faster than child1. As a result, the child1 and child2 block prints are swapped:
+Now, ~90% of the time, the test case runs and passes correctly. However, sometimes child2 is allocated a bit more CPU time
+than child1, resulting in it finishing its P() and/or V() calls faster than child1. As a result,
+the child1 and child2 block prints are swapped (just the P()s in the example below):
 
 Child2(): Semaphore 1 created.  I will now call V on it 250000 times.
  Child1(): V operations completed.  I will now call P on the semaphore the same number of times.
@@ -65,9 +66,9 @@ Child2(): Semaphore 1 created.  I will now call V on it 250000 times.
  start3(): child 4 returned status of 1
 
  Unfortunately, there is no way for us to force child2 to give more CPU time to child1 to always get it to print correctly.
- Luckily, this shouldn't matter regardless. It doesn't matter whether Child1 or Child2 blocks first, they both end up blocked
+ Luckily, this shouldn't matter regardless. It doesn't matter whether Child1 or Child2 blocks first, as they both end up blocked
  regardless. It is only when they are both blocked that LP_Child is allowed to run. Because it calls SemV(sem1)
  first and SemV(sem2) second, the processes will always unblock in the correct order.
 
- As a result, the race condition does not actually matter, and we get the same overall output regardless of which process
- blocks first. We should meet the requirements to get points for this problem.
+ As a result, the race condition does not actually impact the testcase's logic, and we get the same overall output
+ regardless of which process blocks first. We should still meet the requirements to get points for this problem.
