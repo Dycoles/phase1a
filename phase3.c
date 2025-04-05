@@ -197,14 +197,12 @@ void semCreateSyscall(USLOSS_Sysargs *args) {
     int result = kernSemCreate((int)(long)args->arg1, &semID);
 
     // Set its return values:
-    lock();
     if (result == 0) {
         args->arg1 = (void *)(long)semID;
         args->arg4 = 0;
     } else {
         args->arg4 = (void *)-1;
     }
-    unlock();
 }
 
 /*
@@ -217,13 +215,11 @@ void semPSyscall(USLOSS_Sysargs *args) {
     int result = kernSemP((int)(long)args->arg1);
 
     // Set its return values:
-    lock();
     if (result == 0) {
         args->arg4 = 0;
     } else {
         args->arg4 = (void *)-1;
     }
-    unlock();
 }
 
 /*
@@ -236,13 +232,11 @@ void semVSyscall(USLOSS_Sysargs *args) {
     int result = kernSemV((int)(long)args->arg1);
 
     // Set its return values:
-    lock();
     if (result == 0) {
         args->arg4 = 0;
     } else {
         args->arg4 = (void *)-1;
     }
-    unlock();
 }
 
 /*
