@@ -33,31 +33,69 @@ void unlock() {
 
 void sleepSyscall(USLOSS_Sysargs *args) {
     lock();
+    int seconds = (int)(long)args->arg1;
+    if (seconds < 0) {
+        args->arg4 = (void *) -1;
+    } else {
+        // successfull input, perform operation
+
+        args->arg4 = (void *) 0;
+    }
     unlock();
 }
 
 void termReadSyscall(USLOSS_Sysargs *args) {
     lock();
+    if () {
+        args->arg4 = (void *) -1;
+    } else {
+        // successful input, perform operation
+        args->arg4 = (void *) 0;
+    }
     unlock();
 }
 
 void termWriteSyscall(USLOSS_Sysargs *args) {
     lock();
+    if () {
+        args->arg4 = (void *) -1;
+    } else {
+        // successful input, perform operation
+        args->arg4 = (void *) 0;
+    }
     unlock();
 }
 
 void diskSizeSyscall(USLOSS_Sysargs *args) {
     lock();
+    if () {
+        args->arg4 = (void *) -1;
+    } else {
+        // successful input, perform operation
+        args->arg4 = (void *) 0;
+    }
     unlock();
 }
 
 void diskReadSyscall(USLOSS_Sysargs *arg) {
     lock();
+    if () {
+        args->arg4 = (void *) -1;
+    } else {
+        // successful input, perform operation
+        args->arg4 = (void *) 0;
+    }
     unlock();
 }
 
 void diskWriteSyscall(USLOSS_Sysargs *arg) {
     lock();
+    if () {
+        args->arg4 = (void *) -1;
+    } else {
+        // successful input, perform operation
+        args->arg4 = (void *) 0;
+    }
     unlock();
 }
 
