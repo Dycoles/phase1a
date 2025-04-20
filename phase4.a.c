@@ -14,6 +14,19 @@
 #include <stdio.h>
 
 int userModeMBoxID;
+int x;
+
+typedef struct {
+    int wakeTime;
+    int mboxID;
+} SleepProc;
+
+// create a list of sleeping processes
+SleepProc sleepList[MAXPROC];
+int sleepCount;
+
+// keep track of clock interrupts
+int clockInterrupts = 0;
 
 /*
  * The lock() function gains the lock for user mode operations.
@@ -32,21 +45,39 @@ void unlock() {
 }
 
 void sleepSyscall(USLOSS_Sysargs *args) {
-    lock();
     int seconds = (int)(long)args->arg1;
     if (seconds < 0) {
+        // invalid input, return -1
         args->arg4 = (void *) -1;
+        return;
+    }
+    lock();
+    // successfull input, perform operation
+    int mbox = MboxCreate(1, 0);
+    int wakeTime = clockInterrupts + seconds * 10;
+    if (sleepCount < MAXPROC) {
+        sleepList[sleepCount].wakeTime = wakeTime;
+        sleepList[sleepCount].mboxID = mbox;
+        sleepCount++;
     } else {
-        // successfull input, perform operation
-
-        args->arg4 = (void *) 0;
+        // too many sleeping processes, return -1
+        args->arg4 = (void *) -1;
+        unlock();
+        return;
     }
     unlock();
+    // block until wake up
+    MboxRecv(mbox, NULL, 0);
+    // release after wake up
+    MboxRelease(mbox);
+    // valid operation, return 0;
+    args->arg4 = (void *) 0;
 }
+
 
 void termReadSyscall(USLOSS_Sysargs *args) {
     lock();
-    if () {
+    if (x) {
         args->arg4 = (void *) -1;
     } else {
         // successful input, perform operation
@@ -57,7 +88,7 @@ void termReadSyscall(USLOSS_Sysargs *args) {
 
 void termWriteSyscall(USLOSS_Sysargs *args) {
     lock();
-    if () {
+    if (x) {
         args->arg4 = (void *) -1;
     } else {
         // successful input, perform operation
@@ -66,9 +97,10 @@ void termWriteSyscall(USLOSS_Sysargs *args) {
     unlock();
 }
 
+// To implement in phase 4b
 void diskSizeSyscall(USLOSS_Sysargs *args) {
     lock();
-    if () {
+    if (x) {
         args->arg4 = (void *) -1;
     } else {
         // successful input, perform operation
@@ -77,9 +109,10 @@ void diskSizeSyscall(USLOSS_Sysargs *args) {
     unlock();
 }
 
-void diskReadSyscall(USLOSS_Sysargs *arg) {
+// To implement in phase 4b
+void diskReadSyscall(USLOSS_Sysargs *args) {
     lock();
-    if () {
+    if (x) {
         args->arg4 = (void *) -1;
     } else {
         // successful input, perform operation
@@ -88,21 +121,59 @@ void diskReadSyscall(USLOSS_Sysargs *arg) {
     unlock();
 }
 
-void diskWriteSyscall(USLOSS_Sysargs *arg) {
+// To implement in phase 4b
+void diskWriteSyscall(USLOSS_Sysargs *args) {
     lock();
-    if () {
+    if (x) {
         args->arg4 = (void *) -1;
     } else {
         // successful input, perform operation
         args->arg4 = (void *) 0;
     }
     unlock();
+}
+
+int clockDriver(void *arg) {
+    int status;
+    // use infinite loop which increments counter each time interrupt is received
+    while (1) {
+        waitDevice(USLOSS_CLOCK_DEV, 0, &status);
+        clockInterrupts++;
+        lock();
+        // repeatedly loop through sleep queue to check if it is time to wake up the process
+        for (int i = 0; i < sleepCount; i++) {
+            if (sleepList[i].wakeTime <= clockInterrupts) {
+                // wake up the process
+                MboxSend(sleepList[i].mboxID, NULL, 0);
+                // remove the process from the queue and shift the items
+                for (int j = i; j < sleepCount - 1; j++) {
+                    sleepList[j] = sleepList[j+1];
+                }
+                sleepCount--;
+                i--;
+            }
+        }
+        unlock();
+    }
+    return 0;
+}
+
+int terminalDriver(void *arg) {
+    waitDevice(USLOSS_TERM_DEV, 0, NULL);
+    return 0;
+}
+
+int diskDriver(void *arg) {
+    waitDevice(USLOSS_DISK_DEV, 0, NULL);
+    return 0;
 }
 
 void phase4_init() {
+    // phase4a syscalls
     systemCallVec[SYS_SLEEP] = (void (*)(USLOSS_Sysargs *))sleepSyscall;
     systemCallVec[SYS_TERMREAD] = (void (*)(USLOSS_Sysargs *))termReadSyscall;
     systemCallVec[SYS_TERMWRITE] = (void (*)(USLOSS_Sysargs *))termWriteSyscall;
+    // phase4b syscalls
     systemCallVec[SYS_DISKSIZE] = (void (*)(USLOSS_Sysargs *))diskSizeSyscall;
     systemCallVec[SYS_DISKREAD] = (void (*)(USLOSS_Sysargs *))diskReadSyscall;
     systemCallVec[SYS_DISKWRITE] = (void (*)(USLOSS_Sysargs *))diskWriteSyscall;
@@ -114,5 +185,12 @@ void phase4_init() {
 }
 
 void phase4_start_service_processes() {
-
+    // start the clock driver
+    int result = spork("ClockDriver", clockDriver, NULL, USLOSS_MIN_STACK, 2);
+    if (result < 0) {
+        USLOSS_Console("Failed to start clock driver\n");
+        USLOSS_Halt(1);
+    }
+    // start the term driver
+    // start the disk driver
 }
