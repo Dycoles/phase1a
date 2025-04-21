@@ -21,12 +21,83 @@ typedef struct {
     int mboxID;
 } SleepProc;
 
+typedef struct {
+    int size;
+    SleepProc arr[MAXPROC];
+} MinHeap;
+
 // create a list of sleeping processes
-SleepProc sleepList[MAXPROC];
-int sleepCount;
+MinHeap sleepHeap;
 
 // keep track of clock interrupts
 int clockInterrupts = 0;
+
+// swap elements in the heap
+void swap(SleepProc* a, SleepProc* b) {
+    SleepProc temp = *a;
+    *a = *b;
+    *b = temp;
+}
+
+// helper function for insert
+void insertHelper(MinHeap* h, int index) {
+    if (index == 0) {
+        return;
+    }
+    int parent = (index - 1)/2;
+    // swap when child is smaller, then parent element
+    if (h->arr[parent].wakeTime > h->arr[index].wakeTime) {
+        swap(&h->arr[parent], &h->arr[index]);
+        insertHelper(h, parent);
+    }
+}
+
+// insert elements into the heap
+void insert(MinHeap* h, SleepProc proc) {
+    if (h->size < MAXPROC) {
+        h->arr[h->size] = proc;
+        insertHelper(h, h->size);
+        h->size++;
+    }
+}
+
+// heapify to sort elements in min heap order
+void heapify(MinHeap *h, int index) {
+    int left = index * 2 + 1;
+    int right = index * 2 + 2;
+    int min = index;
+    // check if left or right child is at correct index
+    if (left >= h->size || left < 0) {
+        left = -1;
+    }
+    if (right >= h->size || right < 0) {
+        right = -1;
+    }
+    // store left or right as min if any smaller than parent
+    if (left != -1 && h->arr[left].wakeTime < h->arr[index].wakeTime) {
+        min = left;
+    }
+    if (right != -1 && h->arr[right].wakeTime < h->arr[min].wakeTime) {
+        min = right;
+    }
+    // swap the nodes
+    if (min != index) {
+        swap(&h->arr[min], &h->arr[index]);
+        heapify(h, min);
+    }
+}
+
+// remove smallest item and heapify 
+void removeMin(MinHeap* h) {
+    if (h->size == 0) {
+        USLOSS_Console("Cannot remove from empty heap\n");
+        USLOSS_Halt(1);
+    }
+    // replace root with last element
+    h->arr[0] = h->arr[h->size - 1];
+    h->size--;
+    heapify(h, 0);
+}
 
 /*
  * The lock() function gains the lock for user mode operations.
@@ -55,10 +126,11 @@ void sleepSyscall(USLOSS_Sysargs *args) {
     // successfull input, perform operation
     int mbox = MboxCreate(1, 0);
     int wakeTime = clockInterrupts + seconds * 10;
-    if (sleepCount < MAXPROC) {
-        sleepList[sleepCount].wakeTime = wakeTime;
-        sleepList[sleepCount].mboxID = mbox;
-        sleepCount++;
+    if (sleepHeap.size < MAXPROC) {
+        SleepProc proc;
+        proc.wakeTime = wakeTime;
+        proc.mboxID = mbox;
+        insert(&sleepHeap, proc);
     } else {
         // too many sleeping processes, return -1
         args->arg4 = (void *) -1;
@@ -168,17 +240,9 @@ int clockDriver(void *arg) {
         clockInterrupts++;
         lock();
         // repeatedly loop through sleep queue to check if it is time to wake up the process
-        for (int i = 0; i < sleepCount; i++) {
-            if (sleepList[i].wakeTime <= clockInterrupts) {
-                // wake up the process
-                MboxSend(sleepList[i].mboxID, NULL, 0);
-                // remove the process from the queue and shift the items
-                for (int j = i; j < sleepCount - 1; j++) {
-                    sleepList[j] = sleepList[j+1];
-                }
-                sleepCount--;
-                i--;
-            }
+        while (sleepHeap.size > 0 && sleepHeap.arr[0].wakeTime <= clockInterrupts) {
+            MboxSend(sleepHeap.arr[0].mboxID, NULL, 0);
+            removeMin(&sleepHeap);
         }
         unlock();
     }
@@ -186,12 +250,14 @@ int clockDriver(void *arg) {
 }
 
 int terminalDriver(void *arg) {
-    waitDevice(USLOSS_TERM_DEV, 0, NULL);
+    int status;
+    waitDevice(USLOSS_TERM_DEV, 0, &status);
     return 0;
 }
 
 int diskDriver(void *arg) {
-    waitDevice(USLOSS_DISK_DEV, 0, NULL);
+    int status;
+    waitDevice(USLOSS_DISK_DEV, 0, &status);
     return 0;
 }
 
@@ -209,6 +275,8 @@ void phase4_init() {
     userModeMBoxID = MboxCreate(1, 0);
     // make user mode lock available to start with
     MboxSend(userModeMBoxID, NULL, 0);  
+    // initialize heap size to 0
+    sleepHeap.size = 0;
 }
 
 void phase4_start_service_processes() {
@@ -224,5 +292,7 @@ void phase4_start_service_processes() {
         USLOSS_Console("Failed to start terminal driver\n");
         USLOSS_Halt(1);
     }
+    // start the term reader
+    // start the term writer
     // start the disk driver
 }
