@@ -148,44 +148,51 @@ void sleepSyscall(USLOSS_Sysargs *args) {
 
 
 void termReadSyscall(USLOSS_Sysargs *args) {
+    // System Call Arguments:
+    // arg1: buffer pointer
+    char *readBuffer = (char *) args->arg1;
+    // arg2: length of the buffer
+    int len = (int)(long) args->arg2;
+    // arg3: which terminal to read
+    int unit = (int)(long) args->arg3;
+
     lock();
     args->arg4 = 0;
 
     int charsInput;
-    if (args->arg2 < MAXLINE) {
-        charsInput = args->arg2;
+    if (len < MAXLINE) {
+        charsInput = len;
     } else {
         charsInput = MAXLINE;
     }
 
-    char *readBuffer = args->arg1;
-    int i;
+    int i = 0;
     for (int i = 0; i < charsInput; i++) {
         int DSRContents;
-        int readStatus = USLOSS_DeviceInput(USLOSS_TERM_DEV, args->arg3, &DSRContents);
+        int readStatus = USLOSS_DeviceInput(USLOSS_TERM_DEV, (int)(long)args->arg3, &DSRContents);
         if (readStatus != USLOSS_DEV_OK) {
             USLOSS_Console("Error in read\n");
-            args->arg4 = -1;
+            args->arg4 = (void *) -1;
             break;
         }
         char thisChar = (char)(DSRContents << 8);
         readBuffer[i] = thisChar;
-        USLOSS_Console("End of read loop: %d\n", args->arg3);
+        USLOSS_Console("End of read loop: %d\n", unit);
     }
     args->arg2 = i;
-
-    // Check for illegal values:
-    //if (x) {
-    //    args->arg4 = (void *) -1;
-    //} else {
-    //    // successful input, perform operation
-    //    args->arg4 = (void *) 0;
-    //}
+    args->arg4 = (void *) 0;
     
     unlock();
 }
 
 void termWriteSyscall(USLOSS_Sysargs *args) {
+    // System Call Arguments:
+    // arg1: buffer pointer
+    char *buf = (char *) args->arg1;
+    // arg2: length of the buffer
+    int len = (int)(long) args->arg2;
+    // arg3: which terminal to read
+    int unit = (int)(long) args->arg3;
     lock();
     if (x) {
         args->arg4 = (void *) -1;
@@ -249,10 +256,47 @@ int clockDriver(void *arg) {
     return 0;
 }
 
+void handle_one_terminal_interrupt(int unit, int status) {
+    int mboxid; // placeholder for send command; mboxid tbd
+    char *buf; // a string in memory, somewhere (placeholder for now)
+    int i; // the index, into the string, of the next char to send (placeholder for now)
+
+    // if recv is ready
+    if (USLOSS_TERM_STAT_RECV(status) == USLOSS_DEV_READY) {
+        // Read character from status
+        char c = USLOSS_TERM_STAT_CHAR(status);
+        // place character in buffer
+        
+        // wake up waiting process
+        MboxSend(mboxid, NULL, 0);
+    }
+    // if xmit is ready
+    if (USLOSS_TERM_STAT_XMIT(status) == USLOSS_DEV_READY) {
+        // if a previous send has now completed a "write" op...
+        if (x) {
+            // wake up a process
+            int cr_val = 0;
+            cr_val = 0x1; // this turns on the ’send char’ bit (USLOSS spec page 9)
+            cr_val |= 0x2; // recv int enable
+            cr_val |= 0x4; // xmit int enable
+            cr_val |= (buf[i] << 8); // the character to send
+            USLOSS_DeviceOutput(USLOSS_TERM_DEV, unit, (void*)(long)cr_val);
+        }
+        // if some buffer is waiting to be flushed
+        if (x) {
+            // send a single character
+            MboxSend(mboxid, NULL, 0);
+        }
+    }
+}
+
 int terminalDriver(void *arg) {
     int status;
-    waitDevice(USLOSS_TERM_DEV, 0, &status);
-    return 0;
+    int unit = (int)(long)arg;
+    while (1) {
+        waitDevice(USLOSS_TERM_DEV, 0, &status);
+        handle_one_terminal_interrupt(unit, status);
+    }
 }
 
 int diskDriver(void *arg) {
@@ -286,13 +330,16 @@ void phase4_start_service_processes() {
         USLOSS_Console("Failed to start clock driver\n");
         USLOSS_Halt(1);
     }
-    // start the term driver
-    int terminalResult = spork("TerminalDriver", terminalDriver, NULL, USLOSS_MIN_STACK, 2);
-    if (terminalResult < 0) {
-        USLOSS_Console("Failed to start terminal driver\n");
-        USLOSS_Halt(1);
+    // start the term driver for the 4 terminals
+    for (int i = 0; i < 4; i++) {
+        char name[16];
+        sprintf(name, "TerminalDriver%d", i);
+        int terminalResult = spork(name, terminalDriver, NULL, USLOSS_MIN_STACK, 2);
+        if (terminalResult < 0) {
+            USLOSS_Console("Failed to start terminal driver\n");
+            USLOSS_Halt(1);
+        }
     }
-    // start the term reader
-    // start the term writer
-    // start the disk driver
+
+    // start the disk driver -> phase4b code
 }
