@@ -77,12 +77,39 @@ void sleepSyscall(USLOSS_Sysargs *args) {
 
 void termReadSyscall(USLOSS_Sysargs *args) {
     lock();
-    if (x) {
-        args->arg4 = (void *) -1;
+    args->arg4 = 0;
+
+    int charsInput;
+    if (args->arg2 < MAXLINE) {
+        charsInput = args->arg2;
     } else {
-        // successful input, perform operation
-        args->arg4 = (void *) 0;
+        charsInput = MAXLINE;
     }
+
+    char *readBuffer = args->arg1;
+    int i;
+    for (int i = 0; i < charsInput; i++) {
+        int DSRContents;
+        int readStatus = USLOSS_DeviceInput(USLOSS_TERM_DEV, args->arg3, &DSRContents);
+        if (readStatus != USLOSS_DEV_OK) {
+            USLOSS_Console("Error in read\n");
+            args->arg4 = -1;
+            break;
+        }
+        char thisChar = (char)(DSRContents << 8);
+        readBuffer[i] = thisChar;
+        USLOSS_Console("End of read loop: %d\n", args->arg3);
+    }
+    args->arg2 = i;
+
+    // Check for illegal values:
+    //if (x) {
+    //    args->arg4 = (void *) -1;
+    //} else {
+    //    // successful input, perform operation
+    //    args->arg4 = (void *) 0;
+    //}
+    
     unlock();
 }
 
@@ -186,11 +213,16 @@ void phase4_init() {
 
 void phase4_start_service_processes() {
     // start the clock driver
-    int result = spork("ClockDriver", clockDriver, NULL, USLOSS_MIN_STACK, 2);
-    if (result < 0) {
+    int clockResult = spork("ClockDriver", clockDriver, NULL, USLOSS_MIN_STACK, 2);
+    if (clockResult < 0) {
         USLOSS_Console("Failed to start clock driver\n");
         USLOSS_Halt(1);
     }
     // start the term driver
+    int terminalResult = spork("TerminalDriver", terminalDriver, NULL, USLOSS_MIN_STACK, 2);
+    if (terminalResult < 0) {
+        USLOSS_Console("Failed to start terminal driver\n");
+        USLOSS_Halt(1);
+    }
     // start the disk driver
 }
