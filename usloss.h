@@ -9,6 +9,7 @@
 #define USLOSS_MAX_SLOTS    16
 #define USLOSS_MAX_ARGS     10
 #define MAXSYSCALLS         50  /* Maximum number of system calls */
+#define USLOSS_MIN_STACK    0
 
 /* Process states */
 #define USLOSS_PROC_READY    1
@@ -33,6 +34,8 @@
 /* Status values */
 #define USLOSS_DEV_READY     0
 #define USLOSS_DEV_BUSY      1
+#define USLOSS_DEV_ERROR     2
+#define USLOSS_DEV_OK        3
 
 /* Error codes */
 #define USLOSS_ERR_OK        0
