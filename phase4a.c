@@ -148,6 +148,11 @@ void sleepSyscall(USLOSS_Sysargs *args) {
 
 
 void termReadSyscall(USLOSS_Sysargs *args) {
+    //USLOSS_Console("In Read\n");
+    /*while (1){
+        dumpProcesses();
+        for (int i = 0; i < 100000000; i++);
+    }*/
     // System Call Arguments:
     // arg1: buffer pointer
     char *readBuffer = (char *) args->arg1;
@@ -166,10 +171,18 @@ void termReadSyscall(USLOSS_Sysargs *args) {
         charsInput = MAXLINE;
     }
 
+    // Check for errors:
+    if (charsInput <= 0 || (unit < 0 || unit > 3)) {
+        args->arg4 = -1;
+        unlock();
+        return;
+    }
+
     int i = 0;
     for (int i = 0; i < charsInput; i++) {
         int DSRContents;
         int readStatus = USLOSS_DeviceInput(USLOSS_TERM_DEV, (int)(long)args->arg3, &DSRContents);
+        USLOSS_Console("%d ",DSRContents);
         if (readStatus != USLOSS_DEV_OK) {
             USLOSS_Console("Error in read\n");
             args->arg4 = (void *) -1;
@@ -177,7 +190,6 @@ void termReadSyscall(USLOSS_Sysargs *args) {
         }
         char thisChar = (char)(DSRContents << 8);
         readBuffer[i] = thisChar;
-        USLOSS_Console("End of read loop: %d\n", unit);
     }
     args->arg2 = i;
     args->arg4 = (void *) 0;
@@ -257,6 +269,7 @@ int clockDriver(void *arg) {
 }
 
 void handle_one_terminal_interrupt(int unit, int status) {
+    USLOSS_Console("Top of Handle One\n");
     int mboxid; // placeholder for send command; mboxid tbd
     char *buf; // a string in memory, somewhere (placeholder for now)
     int i; // the index, into the string, of the next char to send (placeholder for now)
@@ -268,7 +281,7 @@ void handle_one_terminal_interrupt(int unit, int status) {
         // place character in buffer
         
         // wake up waiting process
-        MboxSend(mboxid, NULL, 0);
+        MboxSend(mboxid, NULL, 0);  // FIXME Recv?
     }
     // if xmit is ready
     if (USLOSS_TERM_STAT_XMIT(status) == USLOSS_DEV_READY) {
@@ -294,8 +307,11 @@ int terminalDriver(void *arg) {
     int status;
     int unit = (int)(long)arg;
     while (1) {
-        waitDevice(USLOSS_TERM_DEV, 0, &status);
+        //USLOSS_Console("In Terminal Driver 1: %d %d\n", getpid(), unit);
+        waitDevice(USLOSS_TERM_DEV, unit, &status);
+        USLOSS_Console("In Terminal Driver 2: %d\n", getpid());
         handle_one_terminal_interrupt(unit, status);
+        USLOSS_Console("In Terminal Driver 3: %d\n", getpid());
     }
 }
 
@@ -334,7 +350,7 @@ void phase4_start_service_processes() {
     for (int i = 0; i < 4; i++) {
         char name[16];
         sprintf(name, "TerminalDriver%d", i);
-        int terminalResult = spork(name, terminalDriver, NULL, USLOSS_MIN_STACK, 2);
+        int terminalResult = spork(name, terminalDriver, i, USLOSS_MIN_STACK, 2);
         if (terminalResult < 0) {
             USLOSS_Console("Failed to start terminal driver\n");
             USLOSS_Halt(1);
