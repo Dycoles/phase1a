@@ -181,16 +181,26 @@ void termReadSyscall(USLOSS_Sysargs *args) {
     int i = 0;
     for (int i = 0; i < charsInput; i++) {
         int DSRContents;
-        dumpProcesses();
-        USLOSS_Console("Reading on %d\n", 3+unit);
-        while (1){}
-        int readStatus = 0;//USLOSS_DeviceInput(USLOSS_TERM_DEV, (int)(long)args->arg3, &DSRContents);
-        USLOSS_Console("%d ",DSRContents);
-        if (readStatus != USLOSS_DEV_OK) {
-            USLOSS_Console("Error in read\n");
-            args->arg4 = (void *) -1;
-            break;
-        }
+        //USLOSS_Console("Reading on %d\n", 3+unit);
+        int i = 0;
+        /*while (1){
+            if (i++ > 1000000000) {
+                i = 0;
+                dumpProcesses();
+            }
+        }*/
+
+        // FIXME: Here, read from whatever data structure we use.
+
+       waitDevice(USLOSS_TERM_DEV, 2, &DSRContents);
+        //int readStatus = USLOSS_DeviceInput(USLOSS_TERM_DEV, (int)(long)args->arg3, &DSRContents);
+        //USLOSS_Console("%d ",DSRContents/*USLOSS_TERM_STAT_CHAR(DSRContents)*/);
+        //while(1){}
+        //if (readStatus != USLOSS_DEV_OK) {
+        //    USLOSS_Console("Error in read\n");
+        //    args->arg4 = (void *) -1;
+        //    break;
+        //}
         char thisChar = (char)(DSRContents << 8);
         readBuffer[i] = thisChar;
     }
@@ -272,26 +282,26 @@ int clockDriver(void *arg) {
 }
 
 void handle_one_terminal_interrupt(int unit, int status) {
-    USLOSS_Console("Top of Handle One\n");
+    USLOSS_Console("Top of Handle One: %c, unit %d\n", USLOSS_TERM_STAT_CHAR(status), unit);
     int mboxid; // placeholder for send command; mboxid tbd
     char *buf; // a string in memory, somewhere (placeholder for now)
     int i; // the index, into the string, of the next char to send (placeholder for now)
 
     // if recv is ready
     if (USLOSS_TERM_STAT_RECV(status) == USLOSS_DEV_READY) {
-        USLOSS_Console("Upper If Handle One\n");
+        //USLOSS_Console("Upper If Handle One\n");
         // Read character from status
         char c = USLOSS_TERM_STAT_CHAR(status);
         // place character in buffer
         
         // wake up waiting process
-        USLOSS_Console("Sending\n");
+        //USLOSS_Console("Sending\n");
         MboxSend(3+unit, NULL, 0);  // FIXME Recv?
-        USLOSS_Console("Sent\n");
+        //USLOSS_Console("Sent\n");
     }
     // if xmit is ready
     if (USLOSS_TERM_STAT_XMIT(status) == USLOSS_DEV_READY) {
-        USLOSS_Console("Lower If Handle One\n");
+        //USLOSS_Console("Lower If Handle One\n");
         // if a previous send has now completed a "write" op...
         if (x) {
             // wake up a process
@@ -308,18 +318,18 @@ void handle_one_terminal_interrupt(int unit, int status) {
             MboxSend(mboxid, NULL, 0);
         }
     }
-    USLOSS_Console("End Of Handle One: %d\n\n", unit);
+    //USLOSS_Console("End Of Handle One: %d\n\n", unit);
 }
 
 int terminalDriver(void *arg) {
-    int status;
+    int status = 0;
     int unit = (int)(long)arg;
     while (1) {
-        USLOSS_Console("In Terminal Driver 1: %d. Unit: %d\n", getpid(), USLOSS_TERM_DEV+unit);
+        //USLOSS_Console("In Terminal Driver 1: %d. Unit: %d\n", getpid(), unit);
         waitDevice(USLOSS_TERM_DEV, unit, &status);
-        USLOSS_Console("In Terminal Driver 2: %d\n", getpid());
+        //USLOSS_Console("In Terminal Driver 2: %d\n", getpid());
         handle_one_terminal_interrupt(unit, status);
-        USLOSS_Console("In Terminal Driver 3: %d\n", getpid());
+        //USLOSS_Console("In Terminal Driver 3: %d\n", getpid());
     }
 }
 
@@ -330,6 +340,18 @@ int diskDriver(void *arg) {
 }
 
 void phase4_init() {
+    int cr_val = 0x0; // this turns on the ’send char’ bit (USLOSS spec page 9)
+    cr_val |= 0x2; // recv int enable
+    cr_val |= 0x4; // xmit int enable
+    cr_val |= ('\0'<<8); // the character to send
+    USLOSS_Console("%x\n", cr_val);
+    if (USLOSS_DeviceOutput(USLOSS_TERM_DEV, 0, (void*)(long)cr_val) != USLOSS_DEV_OK)USLOSS_Console("Bad\n");
+    if (USLOSS_DeviceOutput(USLOSS_TERM_DEV, 1, (void*)(long)cr_val) != USLOSS_DEV_OK)USLOSS_Console("Bad\n");
+    if (USLOSS_DeviceOutput(USLOSS_TERM_DEV, 2, (void*)(long)cr_val) != USLOSS_DEV_OK)USLOSS_Console("Bad\n");
+    if (USLOSS_DeviceOutput(USLOSS_TERM_DEV, 3, (void*)(long)cr_val) != USLOSS_DEV_OK)USLOSS_Console("Bad\n");
+    
+    USLOSS_Console("%x\n", cr_val);
+
     // phase4a syscalls
     systemCallVec[SYS_SLEEP] = (void (*)(USLOSS_Sysargs *))sleepSyscall;
     systemCallVec[SYS_TERMREAD] = (void (*)(USLOSS_Sysargs *))termReadSyscall;
