@@ -193,11 +193,17 @@ void termWriteSyscall(USLOSS_Sysargs *args) {
     // arg3: which terminal to read
     int unit = (int)(long) args->arg3;
     lock();
-    if (x) {
-        args->arg4 = (void *) -1;
+    // error checking
+    int charsInput;
+    if (len < MAXLINE) {
+        charsInput = len;
     } else {
-        // successful input, perform operation
-        args->arg4 = (void *) 0;
+        charsInput = MAXLINE;
+    }
+    if (charsInput <= 0 || (unit < 0 || unit > 3)) {
+        args->arg4 = -1;
+        unlock();
+        return;
     }
     unlock();
 }
