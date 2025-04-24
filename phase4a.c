@@ -148,7 +148,7 @@ void sleepSyscall(USLOSS_Sysargs *args) {
 
 
 void termReadSyscall(USLOSS_Sysargs *args) {
-    //USLOSS_Console("In Read\n");
+    USLOSS_Console("In Read\n");
     /*while (1){
         dumpProcesses();
         for (int i = 0; i < 100000000; i++);
@@ -181,7 +181,10 @@ void termReadSyscall(USLOSS_Sysargs *args) {
     int i = 0;
     for (int i = 0; i < charsInput; i++) {
         int DSRContents;
-        int readStatus = USLOSS_DeviceInput(USLOSS_TERM_DEV, (int)(long)args->arg3, &DSRContents);
+        dumpProcesses();
+        USLOSS_Console("Reading on %d\n", 3+unit);
+        while (1){}
+        int readStatus = 0;//USLOSS_DeviceInput(USLOSS_TERM_DEV, (int)(long)args->arg3, &DSRContents);
         USLOSS_Console("%d ",DSRContents);
         if (readStatus != USLOSS_DEV_OK) {
             USLOSS_Console("Error in read\n");
@@ -276,15 +279,19 @@ void handle_one_terminal_interrupt(int unit, int status) {
 
     // if recv is ready
     if (USLOSS_TERM_STAT_RECV(status) == USLOSS_DEV_READY) {
+        USLOSS_Console("Upper If Handle One\n");
         // Read character from status
         char c = USLOSS_TERM_STAT_CHAR(status);
         // place character in buffer
         
         // wake up waiting process
-        MboxSend(mboxid, NULL, 0);  // FIXME Recv?
+        USLOSS_Console("Sending\n");
+        MboxSend(3+unit, NULL, 0);  // FIXME Recv?
+        USLOSS_Console("Sent\n");
     }
     // if xmit is ready
     if (USLOSS_TERM_STAT_XMIT(status) == USLOSS_DEV_READY) {
+        USLOSS_Console("Lower If Handle One\n");
         // if a previous send has now completed a "write" op...
         if (x) {
             // wake up a process
@@ -301,13 +308,14 @@ void handle_one_terminal_interrupt(int unit, int status) {
             MboxSend(mboxid, NULL, 0);
         }
     }
+    USLOSS_Console("End Of Handle One: %d\n\n", unit);
 }
 
 int terminalDriver(void *arg) {
     int status;
     int unit = (int)(long)arg;
     while (1) {
-        //USLOSS_Console("In Terminal Driver 1: %d %d\n", getpid(), unit);
+        USLOSS_Console("In Terminal Driver 1: %d. Unit: %d\n", getpid(), USLOSS_TERM_DEV+unit);
         waitDevice(USLOSS_TERM_DEV, unit, &status);
         USLOSS_Console("In Terminal Driver 2: %d\n", getpid());
         handle_one_terminal_interrupt(unit, status);
