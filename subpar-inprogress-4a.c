@@ -174,7 +174,7 @@ void termReadSyscall(USLOSS_Sysargs *args) {
     //lock();
     args->arg4 = 0;
 
-    kernSemP(busySems[0]);
+    // kernSemP(busySems[0]);
     int old_cr_val = 0;
     USLOSS_DeviceInput(USLOSS_TERM_DEV, unit, &old_cr_val);
     int cr_val = 0x0; // this turns on the ’send char’ bit (USLOSS spec page 9)
@@ -194,7 +194,7 @@ void termReadSyscall(USLOSS_Sysargs *args) {
     if (charsInput <= 0 || (unit < 0 || unit > 3)) {
         args->arg4 = -1;
         //unlock();
-        kernSemV(busySems[0]);
+        // kernSemV(busySems[0]);
         return;
     }
 
@@ -203,7 +203,7 @@ void termReadSyscall(USLOSS_Sysargs *args) {
     for (i; i < charsInput; i++) {
         if (MboxRecv(readMbox[unit], &readBuffer[i], sizeof(char)) < 0) {
             args->arg4 = (void *) -1;
-            kernSemV(busySems[0]);
+            // kernSemV(busySems[0]);
             return;
         }
         //USLOSS_Console("Characters read: %d, %d\n", i, readBuffer[i]);
@@ -220,7 +220,7 @@ void termReadSyscall(USLOSS_Sysargs *args) {
     args->arg2 = (void *)(long) i;
     args->arg4 = (void *) 0;
     USLOSS_DeviceOutput(USLOSS_TERM_DEV, unit, (void*)(long)old_cr_val);
-    kernSemV(busySems[0]);
+    // kernSemV(busySems[0]);
     
     //unlock();
 }
@@ -247,7 +247,7 @@ void termWriteSyscall(USLOSS_Sysargs *args) {
         //unlock();
         return;
     }
-    kernSemP(busySems[0]);
+    kernSemP(busySems[unit]);
     strncpy(writeBuf[unit], buf, charsInput);
     writeLen[unit] = charsInput;
     writeIndex[unit] = 0;
@@ -276,7 +276,7 @@ void termWriteSyscall(USLOSS_Sysargs *args) {
     writeIndex[unit] = 0;
     //USLOSS_Console("After for\n");
     USLOSS_DeviceOutput(USLOSS_TERM_DEV, unit, (void*)(long)old_cr_val);
-    kernSemV(busySems[0]);
+    kernSemV(busySems[unit]);
 
     args->arg4 = (void *)0;
     //USLOSS_Console("End of write\n");
@@ -336,14 +336,11 @@ int clockDriver(void *arg) {
 }
 
 void handle_one_terminal_interrupt(int unit, int status) {
-    //USLOSS_Console("Top of Handle One: %x, unit %d\n", status, unit);
     // if recv is ready
     if (USLOSS_TERM_STAT_RECV(status) == USLOSS_DEV_BUSY) {
-        //USLOSS_Console("In handle one, upper upper if: %c\n", USLOSS_TERM_STAT_CHAR(status));
         // Read character from status
         TermBuf thisBuf = termBufs[unit];
         // place character in buffer and wake up waiting process
-        //USLOSS_Console("Sending character: %d\n", thisBuf.bufI);
         char c = USLOSS_TERM_STAT_CHAR(status);
         if (termBufs[unit].bufIs[termBufs[unit].whichBuf] >= MAXLINE || c == '\n') {
             //USLOSS_Console("Send in handle one: %d\n", c);
@@ -365,25 +362,16 @@ void handle_one_terminal_interrupt(int unit, int status) {
             }
         }
     }
-    //USLOSS_Console("In handle one: %c\n", status>>8);
     // if xmit is ready
     if (USLOSS_TERM_STAT_XMIT(status) == USLOSS_DEV_READY && status>>8 != '\0') {
-        
-        // FIXME: This is where reading terminals enter when they shouldn't,
-        // causing prints that shouldn't be there.
-
-        //USLOSS_Console("Lower If Handle One: %d, %d\n", unit, USLOSS_TERM_STAT_XMIT(status));
         writeIndex[unit]++;
         // if a previous send has now completed a "write" op...
         if (writeIndex[unit] <= writeLen[unit]) {
-            //USLOSS_Console("In handle one, upper lower if: %d\n", writeMbox[unit]);
             // if some buffer is waiting to be flushed
             // send a single character
-            //USLOSS_Console("%c\n", status>>8);
             char charToSend = status>>8;
             MboxSend(writeMbox[unit], &charToSend, 1);
         } else {
-            //USLOSS_Console("In handle one, lower lower if: %d\n", unit);
             // wake up a process
             int cr_val = 0;
             cr_val = 0x0; // this turns on the ’send char’ bit (USLOSS spec page 9)
