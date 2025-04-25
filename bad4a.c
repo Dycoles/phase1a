@@ -154,7 +154,7 @@ void sleepSyscall(USLOSS_Sysargs *args) {
 
 
 void termReadSyscall(USLOSS_Sysargs *args) {
-    USLOSS_Console("In Read\n");
+    // USLOSS_Console("In Read\n");
     char *readBuffer = (char *) args->arg1;
     // arg2: length of the buffer
     int len = (int)(long) args->arg2;
@@ -177,16 +177,10 @@ void termReadSyscall(USLOSS_Sysargs *args) {
         unlock();
         return;
     }
-    // enable terminal interrupts
-    int cr_val = 0x0; // this turns on the ’send char’ bit (USLOSS spec page 9)
-    cr_val |= 0x2; // recv int enable
-    cr_val |= 0x4; // xmit int enable
-    cr_val |= ('\0'<<8); // the character to send
-    USLOSS_DeviceOutput(USLOSS_TERM_DEV, unit, (void *) ((long) cr_val));
 
     int i = 0;
     for (i; i < charsInput; i++) {
-        USLOSS_Console("Characters read: %d\n", i);
+        // USLOSS_Console("Characters read: %d\n", i);
         if (MboxRecv(readMbox[unit], &readBuffer[i], sizeof(char)) < 0) {
             args->arg4 = (void *) -1;
             return;
@@ -298,17 +292,17 @@ int clockDriver(void *arg) {
 }
 
 void handle_one_terminal_interrupt(int unit, int status) {
-    USLOSS_Console("Top of Handle One: %c, unit %d\n", USLOSS_TERM_STAT_CHAR(status), unit);
+    // USLOSS_Console("Top of Handle One: %c, unit %d\n", USLOSS_TERM_STAT_CHAR(status), unit);
     // if recv is ready
-    if (USLOSS_TERM_STAT_RECV(status) == USLOSS_DEV_READY) {
+    if (USLOSS_TERM_STAT_RECV(status) == USLOSS_DEV_BUSY) {
         // Read character from status
         char c = USLOSS_TERM_STAT_CHAR(status);
         // place character in buffer and wake up waiting process
-        USLOSS_Console("Sending character\n");
+        // USLOSS_Console("Sending character\n");
         MboxSend(readMbox[unit], &c, sizeof(char));
     }
     // if xmit is ready
-    if (USLOSS_TERM_STAT_XMIT(status) == USLOSS_DEV_READY) {
+    if (USLOSS_TERM_STAT_XMIT(status) == USLOSS_DEV_BUSY) {
         //USLOSS_Console("Lower If Handle One\n");
         writeIndex[unit]++;
         // if a previous send has now completed a "write" op...
@@ -333,11 +327,8 @@ int terminalDriver(void *arg) {
     int status = 0;
     int unit = (int)(long)arg;
     while (1) {
-        //USLOSS_Console("In Terminal Driver 1: %d. Unit: %d\n", getpid(), unit);
         waitDevice(USLOSS_TERM_DEV, unit, &status);
-        //USLOSS_Console("In Terminal Driver 2: %d\n", getpid());
         handle_one_terminal_interrupt(unit, status);
-        //USLOSS_Console("In Terminal Driver 3: %d\n", getpid());
     }
 }
 
@@ -352,18 +343,18 @@ void phase4_init() {
     cr_val |= 0x2; // recv int enable
     cr_val |= 0x4; // xmit int enable
     cr_val |= ('\0'<<8); // the character to send
-    USLOSS_Console("%x\n", cr_val);
+    // USLOSS_Console("%x\n", cr_val);
     if (USLOSS_DeviceOutput(USLOSS_TERM_DEV, 0, (void*)(long)cr_val) != USLOSS_DEV_OK)USLOSS_Console("Bad\n");
     if (USLOSS_DeviceOutput(USLOSS_TERM_DEV, 1, (void*)(long)cr_val) != USLOSS_DEV_OK)USLOSS_Console("Bad\n");
     if (USLOSS_DeviceOutput(USLOSS_TERM_DEV, 2, (void*)(long)cr_val) != USLOSS_DEV_OK)USLOSS_Console("Bad\n");
     if (USLOSS_DeviceOutput(USLOSS_TERM_DEV, 3, (void*)(long)cr_val) != USLOSS_DEV_OK)USLOSS_Console("Bad\n");
     
-    USLOSS_Console("%x\n", cr_val);
+    // USLOSS_Console("%x\n", cr_val);
 
     // phase4a syscalls
     systemCallVec[SYS_SLEEP] = (void (*)(USLOSS_Sysargs *))sleepSyscall;
     systemCallVec[SYS_TERMREAD] = (void (*)(USLOSS_Sysargs *))termReadSyscall;
-    // systemCallVec[SYS_TERMWRITE] = (void (*)(USLOSS_Sysargs *))termWriteSyscall;
+    systemCallVec[SYS_TERMWRITE] = (void (*)(USLOSS_Sysargs *))termWriteSyscall;
     // phase4b syscalls
     systemCallVec[SYS_DISKSIZE] = (void (*)(USLOSS_Sysargs *))diskSizeSyscall;
     systemCallVec[SYS_DISKREAD] = (void (*)(USLOSS_Sysargs *))diskReadSyscall;
