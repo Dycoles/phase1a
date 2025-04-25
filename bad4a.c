@@ -26,10 +26,14 @@ typedef struct {
     SleepProc arr[MAXPROC];
 } MinHeap;
 
+int readMbox[4];
+int writeMbox[4];
+int writeIndex[4];
+char writeBuf[4][MAXLINE];
+int writeLen[4];
+
 // create a list of sleeping processes
 MinHeap sleepHeap;
-// create a list of mboxes for each terminal
-int readMbox[4];
 
 // keep track of clock interrupts
 int clockInterrupts = 0;
@@ -157,34 +161,54 @@ void termReadSyscall(USLOSS_Sysargs *args) {
     // arg3: which terminal to read
     int unit = (int)(long) args->arg3;
 
-    // error checking
+    lock();
+    args->arg4 = 0;
+
     int charsInput;
     if (len < MAXLINE) {
         charsInput = len;
     } else {
         charsInput = MAXLINE;
     }
+
+    // Check for errors:
     if (charsInput <= 0 || (unit < 0 || unit > 3)) {
         args->arg4 = -1;
         unlock();
         return;
     }
-    // successful input, create mailbox with 10 slots, each slot with a size of MAXLINE
-    // Allows storage of 10 messages that are MAXLINE bytes long
-    int mbox = MboxCreate(10, MAXLINE);
-    // create line we are going to read
-    char line[MAXLINE];
-    // store message in mailbox
-    int retval = MboxRecv(mbox, &line, MAXLINE);
-    if (retval > len) {
-        retval = len;
+    // enable terminal interrupts
+    int cr_val = 0x0; // this turns on the ’send char’ bit (USLOSS spec page 9)
+    cr_val |= 0x2; // recv int enable
+    cr_val |= 0x4; // xmit int enable
+    cr_val |= ('\0'<<8); // the character to send
+    USLOSS_DeviceOutput(USLOSS_TERM_DEV, unit, (void *) ((long) cr_val));
+
+    int i = 0;
+    for (i; i < charsInput; i++) {
+        USLOSS_Console("Characters read: %d\n", i);
+        if (MboxRecv(readMbox[unit], &readBuffer[i], sizeof(char)) < 0) {
+            args->arg4 = (void *) -1;
+            return;
+        }
+        if (readBuffer[i] == '\n') {
+            i++;
+            break;
+        }
     }
-    args->arg2 = (int)(long) retval;
+    if (i < len) {
+        readBuffer[i] = '\0';
+    } else {
+        readBuffer[len-1] = '\0';
+    }
+    args->arg2 = (void *)(long) i;
     args->arg4 = (void *) 0;
+    
     unlock();
 }
 
 void termWriteSyscall(USLOSS_Sysargs *args) {
+    USLOSS_Console("In Write\n");
     // System Call Arguments:
     // arg1: buffer pointer
     char *buf = (char *) args->arg1;
@@ -205,7 +229,19 @@ void termWriteSyscall(USLOSS_Sysargs *args) {
         unlock();
         return;
     }
+    strncpy(writeBuf[unit], buf, charsInput);
+    writeLen[unit] = charsInput;
+    writeIndex[unit] = 0;
+    int cr_val = 0x0; // this turns on the ’send char’ bit (USLOSS spec page 9)
+    cr_val |= 0x2; // recv int enable
+    cr_val |= 0x4; // xmit int enable
+    cr_val |= (writeBuf[unit][0] << 8); // the character to send
+    USLOSS_DeviceOutput(USLOSS_TERM_DEV, unit, (void*)(long)cr_val);
     unlock();
+
+    // block until write is complete
+    MboxRecv(writeMbox[unit], NULL, 0);
+    args->arg4 = (void *)0;
 }
 
 // To implement in phase 4b
@@ -262,58 +298,46 @@ int clockDriver(void *arg) {
 }
 
 void handle_one_terminal_interrupt(int unit, int status) {
-    USLOSS_Console("Top of Handle One\n");
-    int mboxid; // placeholder for send command; mboxid tbd
-    char *buf; // a string in memory, somewhere (placeholder for now)
-    int i; // the index, into the string, of the next char to send (placeholder for now)
-    char line[MAXLINE];
-    int next = 0;
-
+    USLOSS_Console("Top of Handle One: %c, unit %d\n", USLOSS_TERM_STAT_CHAR(status), unit);
     // if recv is ready
     if (USLOSS_TERM_STAT_RECV(status) == USLOSS_DEV_READY) {
-        USLOSS_Console("Upper If Handle One\n");
         // Read character from status
         char c = USLOSS_TERM_STAT_CHAR(status);
-        // place character in buffer
-        line[next] = c;
-        // wake up waiting process (if appropriate)
-        if (c == '\n' || next == MAXLINE) {
-            USLOSS_Console("Sending\n");
-            MboxSend(readMbox[unit], line, next);
-            USLOSS_Console("Sent\n");
-        }
+        // place character in buffer and wake up waiting process
+        USLOSS_Console("Sending character\n");
+        MboxSend(readMbox[unit], &c, sizeof(char));
     }
     // if xmit is ready
     if (USLOSS_TERM_STAT_XMIT(status) == USLOSS_DEV_READY) {
-        USLOSS_Console("Lower If Handle One\n");
+        //USLOSS_Console("Lower If Handle One\n");
+        writeIndex[unit]++;
         // if a previous send has now completed a "write" op...
-        if (x) {
+        if (writeIndex[unit] < writeLen[unit]) {
             // wake up a process
             int cr_val = 0;
             cr_val = 0x1; // this turns on the ’send char’ bit (USLOSS spec page 9)
             cr_val |= 0x2; // recv int enable
             cr_val |= 0x4; // xmit int enable
-            cr_val |= (buf[i] << 8); // the character to send
+            cr_val |= (writeBuf[unit][writeIndex[unit]] << 8); // the character to send
             USLOSS_DeviceOutput(USLOSS_TERM_DEV, unit, (void*)(long)cr_val);
-        }
-        // if some buffer is waiting to be flushed
-        if (x) {
+        } else {
+            // if some buffer is waiting to be flushed
             // send a single character
-            MboxSend(mboxid, NULL, 0);
+            MboxSend(writeMbox[unit], NULL, 0);
         }
     }
-    USLOSS_Console("End Of Handle One: %d\n\n", unit);
+    //USLOSS_Console("End Of Handle One: %d\n\n", unit);
 }
 
 int terminalDriver(void *arg) {
-    int status;
+    int status = 0;
     int unit = (int)(long)arg;
     while (1) {
-        USLOSS_Console("In Terminal Driver 1: %d. Unit: %d\n", getpid(), USLOSS_TERM_DEV+unit);
+        //USLOSS_Console("In Terminal Driver 1: %d. Unit: %d\n", getpid(), unit);
         waitDevice(USLOSS_TERM_DEV, unit, &status);
-        USLOSS_Console("In Terminal Driver 2: %d\n", getpid());
+        //USLOSS_Console("In Terminal Driver 2: %d\n", getpid());
         handle_one_terminal_interrupt(unit, status);
-        USLOSS_Console("In Terminal Driver 3: %d\n", getpid());
+        //USLOSS_Console("In Terminal Driver 3: %d\n", getpid());
     }
 }
 
@@ -324,10 +348,22 @@ int diskDriver(void *arg) {
 }
 
 void phase4_init() {
+    int cr_val = 0x0; // this turns on the ’send char’ bit (USLOSS spec page 9)
+    cr_val |= 0x2; // recv int enable
+    cr_val |= 0x4; // xmit int enable
+    cr_val |= ('\0'<<8); // the character to send
+    USLOSS_Console("%x\n", cr_val);
+    if (USLOSS_DeviceOutput(USLOSS_TERM_DEV, 0, (void*)(long)cr_val) != USLOSS_DEV_OK)USLOSS_Console("Bad\n");
+    if (USLOSS_DeviceOutput(USLOSS_TERM_DEV, 1, (void*)(long)cr_val) != USLOSS_DEV_OK)USLOSS_Console("Bad\n");
+    if (USLOSS_DeviceOutput(USLOSS_TERM_DEV, 2, (void*)(long)cr_val) != USLOSS_DEV_OK)USLOSS_Console("Bad\n");
+    if (USLOSS_DeviceOutput(USLOSS_TERM_DEV, 3, (void*)(long)cr_val) != USLOSS_DEV_OK)USLOSS_Console("Bad\n");
+    
+    USLOSS_Console("%x\n", cr_val);
+
     // phase4a syscalls
     systemCallVec[SYS_SLEEP] = (void (*)(USLOSS_Sysargs *))sleepSyscall;
     systemCallVec[SYS_TERMREAD] = (void (*)(USLOSS_Sysargs *))termReadSyscall;
-    systemCallVec[SYS_TERMWRITE] = (void (*)(USLOSS_Sysargs *))termWriteSyscall;
+    // systemCallVec[SYS_TERMWRITE] = (void (*)(USLOSS_Sysargs *))termWriteSyscall;
     // phase4b syscalls
     systemCallVec[SYS_DISKSIZE] = (void (*)(USLOSS_Sysargs *))diskSizeSyscall;
     systemCallVec[SYS_DISKREAD] = (void (*)(USLOSS_Sysargs *))diskReadSyscall;
@@ -336,7 +372,9 @@ void phase4_init() {
     // Create the mailboxes used in this program:
     userModeMBoxID = MboxCreate(1, 0);
     for (int i = 0; i < 4; i++) {
-        readMbox[i] = MboxCreate(10, MAXLINE);
+        readMbox[i] = MboxCreate(MAXLINE, sizeof(char));
+        writeMbox[i] = MboxCreate(1, 0);
+        writeIndex[i] = 0;
     }
     // make user mode lock available to start with
     MboxSend(userModeMBoxID, NULL, 0);  
