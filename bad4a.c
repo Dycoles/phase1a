@@ -27,6 +27,8 @@ typedef struct {
 } MinHeap;
 
 int readMbox[4];
+int readers[4];
+
 int writeMbox[4];
 int writeIndex[4];
 char writeBuf[4][MAXLINE];
@@ -160,7 +162,6 @@ void termReadSyscall(USLOSS_Sysargs *args) {
     int len = (int)(long) args->arg2;
     // arg3: which terminal to read
     int unit = (int)(long) args->arg3;
-
     lock();
     args->arg4 = 0;
 
@@ -173,13 +174,15 @@ void termReadSyscall(USLOSS_Sysargs *args) {
 
     // Check for errors:
     if (charsInput <= 0 || (unit < 0 || unit > 3)) {
-        args->arg4 = -1;
+        args->arg4 = (void *) -1;
         unlock();
         return;
     }
+    // the reader for this unit is active
+    readers[unit] = 1;
 
-    int i = 0;
-    for (i; i < charsInput; i++) {
+    int i;
+    for (i = 0; i < charsInput; i++) {
         // USLOSS_Console("Characters read: %d\n", i);
         if (MboxRecv(readMbox[unit], &readBuffer[i], sizeof(char)) < 0) {
             args->arg4 = (void *) -1;
@@ -190,14 +193,12 @@ void termReadSyscall(USLOSS_Sysargs *args) {
             break;
         }
     }
-    if (i < len) {
-        readBuffer[i] = '\0';
-    } else {
-        readBuffer[len] = '\0';
-    }
+    readBuffer[i] = '\0';
     args->arg2 = (void *)(long) i;
     args->arg4 = (void *) 0;
     
+    // the reader is inactive
+    readers[unit] = 0;
     unlock();
 }
 
@@ -219,7 +220,7 @@ void termWriteSyscall(USLOSS_Sysargs *args) {
         charsInput = MAXLINE;
     }
     if (charsInput <= 0 || (unit < 0 || unit > 3)) {
-        args->arg4 = -1;
+        args->arg4 = (void *) -1;
         unlock();
         return;
     }
@@ -297,8 +298,8 @@ void handle_one_terminal_interrupt(int unit, int status) {
     if (USLOSS_TERM_STAT_RECV(status) == USLOSS_DEV_BUSY) {
         // Read character from status
         char c = USLOSS_TERM_STAT_CHAR(status);
+        // USLOSS_Console("Reading unit %d with character %c\n", unit, c);
         // place character in buffer and wake up waiting process
-        // USLOSS_Console("Sending character\n");
         MboxSend(readMbox[unit], &c, sizeof(char));
     }
     // if xmit is ready
@@ -364,6 +365,9 @@ void phase4_init() {
     userModeMBoxID = MboxCreate(1, 0);
     for (int i = 0; i < 4; i++) {
         readMbox[i] = MboxCreate(MAXLINE, sizeof(char));
+        // all readers are inactive
+        readers[i] = 0;
+
         writeMbox[i] = MboxCreate(1, 0);
         writeIndex[i] = 0;
     }
