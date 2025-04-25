@@ -193,7 +193,7 @@ void termReadSyscall(USLOSS_Sysargs *args) {
     if (i < len) {
         readBuffer[i] = '\0';
     } else {
-        readBuffer[len-1] = '\0';
+        readBuffer[len] = '\0';
     }
     args->arg2 = (void *)(long) i;
     args->arg4 = (void *) 0;
