@@ -188,7 +188,6 @@ void termReadSyscall(USLOSS_Sysargs *args) {
     }
 
     int i;
-    int bufIndex = 0;
     for (i = 0; i < charsInput; i++) {
         int DSRContents;
         //USLOSS_Console("Reading on %d\n", 3+unit);
@@ -211,23 +210,16 @@ void termReadSyscall(USLOSS_Sysargs *args) {
         //    break;
         //}
         char thisChar = (char)USLOSS_TERM_STAT_CHAR(DSRContents);
-        readBuffer[++i] = thisChar;
+        readBuffer[i] = thisChar;
+
         if (thisChar == '\n' || thisChar == '\0') {
-            char lastBufChar = termBufs[unit].bufs[termBufs[unit].whichBuf][bufIndex++];
-            if (lastBufChar != '\0' && i < charsInput) {
-                readBuffer[(i++)-1] = lastBufChar;
-            }
             break;
         }
-        
-        //if (unit == 2)USLOSS_Console("\tIn Read: %d %d | %x\n",termBufs[unit].whichBuf,termBufs[unit].bufI-1, termBufs[unit].bufs[termBufs[unit].whichBuf][bufIndex]);
-        char thisBufChar = termBufs[unit].bufs[termBufs[unit].whichBuf][bufIndex++];
-        if (i < charsInput && thisBufChar != '\0') readBuffer[(i++)-1] = thisBufChar;
-        USLOSS_Console("%d\n", i);
     }
     args->arg2 = i;
     args->arg4 = (void *) 0;
-    USLOSS_Console("End of read: %d | %d\n", i, charsInput);
+    //args->arg1 = "abcde";
+    //USLOSS_Console("End of read: %s\n", args->arg1);
     unlock();
 }
 
@@ -310,15 +302,15 @@ void handle_one_terminal_interrupt(int unit, int status) {
 
     // if recv is ready
     //USLOSS_Console("%d %d ", USLOSS_TERM_STAT_RECV(status), USLOSS_DEV_READY);
-    
     if (USLOSS_TERM_STAT_RECV(status) != USLOSS_DEV_READY) {
         //USLOSS_Console("Upper If Handle One\n");
         // Read character from status
         char c = USLOSS_TERM_STAT_CHAR(status);
         // place character in buffer
-        termBufs[unit].bufs[termBufs[unit].whichBuf][termBufs[unit].bufI] = c;
-        //if (unit == 2)USLOSS_Console("\tIn Handle One: %d %d | %c\n",termBufs[unit].whichBuf,termBufs[unit].bufI-1, termBufs[unit].bufs[termBufs[unit].whichBuf][termBufs[unit].bufI-1]);
-        termBufs[unit].bufI++;// wake up waiting process
+        TermBuf thisBuf = termBufs[unit];
+        thisBuf.bufs[thisBuf.whichBuf][thisBuf.bufI++] = c;
+        //USLOSS_Console("\tIn Handle One: %s\n", thisBuf.bufs[thisBuf.whichBuf]);
+        // wake up waiting process
         //USLOSS_Console("Sending\n");
         //MboxSend(3+unit, NULL, 0);  // FIXME Recv?
         //USLOSS_Console("Sent\n");
@@ -366,13 +358,13 @@ int diskDriver(void *arg) {
 void phase4_init() {
     int cr_val = 0x0; // this turns on the ’send char’ bit (USLOSS spec page 9)
     cr_val |= 0x2; // recv int enable
-    cr_val |= 0x4; // xmit int enable
+    cr_val |= 0x0; // xmit int enable
     cr_val |= ('\0'<<8); // the character to send
     //USLOSS_Console("%x\n", cr_val);
-    if (USLOSS_DeviceOutput(USLOSS_TERM_DEV, 0, (void*)(long)cr_val) != USLOSS_DEV_OK)USLOSS_Console("Bad\n");
-    if (USLOSS_DeviceOutput(USLOSS_TERM_DEV, 1, (void*)(long)cr_val) != USLOSS_DEV_OK)USLOSS_Console("Bad\n");
-    if (USLOSS_DeviceOutput(USLOSS_TERM_DEV, 2, (void*)(long)cr_val) != USLOSS_DEV_OK)USLOSS_Console("Bad\n");
-    if (USLOSS_DeviceOutput(USLOSS_TERM_DEV, 3, (void*)(long)cr_val) != USLOSS_DEV_OK)USLOSS_Console("Bad\n");
+    if (USLOSS_DeviceOutput(USLOSS_TERM_DEV, 0, (void*)(long)cr_val) != USLOSS_DEV_OK) USLOSS_Console("Bad\n");
+    if (USLOSS_DeviceOutput(USLOSS_TERM_DEV, 1, (void*)(long)cr_val) != USLOSS_DEV_OK) USLOSS_Console("Bad\n");
+    if (USLOSS_DeviceOutput(USLOSS_TERM_DEV, 2, (void*)(long)cr_val) != USLOSS_DEV_OK) USLOSS_Console("Bad\n");
+    if (USLOSS_DeviceOutput(USLOSS_TERM_DEV, 3, (void*)(long)cr_val) != USLOSS_DEV_OK) USLOSS_Console("Bad\n");
     //USLOSS_Console("%x\n", cr_val);
 
     // phase4a syscalls
@@ -411,7 +403,7 @@ void phase4_start_service_processes() {
     for (int i = 0; i < 4; i++) {
         char name[16];
         sprintf(name, "TerminalDriver%d", i);
-        int terminalResult = spork(name, terminalDriver, i, USLOSS_MIN_STACK, 2);
+        int terminalResult = 0;//spork(name, terminalDriver, 0, USLOSS_MIN_STACK, 2);
         if (terminalResult < 0) {
             USLOSS_Console("Failed to start terminal driver\n");
             USLOSS_Halt(1);
