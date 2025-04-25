@@ -26,8 +26,15 @@ typedef struct {
     SleepProc arr[MAXPROC];
 } MinHeap;
 
+typedef struct {
+    char bufs[MAXLINE+1][10];
+    int bufIs[10];
+    int whichBuf;
+} TermBuf;
+
 int readMbox[4];
 int writeMbox[4];
+int readReadyMbox[4];
 int writeIndex[4];
 char writeBuf[4][MAXLINE];
 int writeLen[4];
@@ -38,6 +45,8 @@ MinHeap sleepHeap;
 
 // keep track of clock interrupts
 int clockInterrupts = 0;
+
+TermBuf termBufs[4];
 
 // swap elements in the heap
 void swap(SleepProc* a, SleepProc* b) {
@@ -162,10 +171,10 @@ void termReadSyscall(USLOSS_Sysargs *args) {
     // arg3: which terminal to read
     int unit = (int)(long) args->arg3;
 
-    lock();
+    //lock();
     args->arg4 = 0;
 
-    kernSemP(busySems[unit]);
+    kernSemP(busySems[0]);
     int old_cr_val = 0;
     USLOSS_DeviceInput(USLOSS_TERM_DEV, unit, &old_cr_val);
     int cr_val = 0x0; // this turns on the ’send char’ bit (USLOSS spec page 9)
@@ -184,19 +193,20 @@ void termReadSyscall(USLOSS_Sysargs *args) {
     // Check for errors:
     if (charsInput <= 0 || (unit < 0 || unit > 3)) {
         args->arg4 = -1;
-        unlock();
-        kernSemV(busySems[unit]);
+        //unlock();
+        kernSemV(busySems[0]);
         return;
     }
 
+    MboxRecv(readReadyMbox[unit], NULL, 0);
     int i = 0;
     for (i; i < charsInput; i++) {
-        // USLOSS_Console("Characters read: %d\n", i);
         if (MboxRecv(readMbox[unit], &readBuffer[i], sizeof(char)) < 0) {
             args->arg4 = (void *) -1;
-            kernSemV(busySems[unit]);
+            kernSemV(busySems[0]);
             return;
         }
+        //USLOSS_Console("Characters read: %d, %d\n", i, readBuffer[i]);
         if (readBuffer[i] == '\n') {
             i++;
             break;
@@ -210,13 +220,12 @@ void termReadSyscall(USLOSS_Sysargs *args) {
     args->arg2 = (void *)(long) i;
     args->arg4 = (void *) 0;
     USLOSS_DeviceOutput(USLOSS_TERM_DEV, unit, (void*)(long)old_cr_val);
-    kernSemV(busySems[unit]);
+    kernSemV(busySems[0]);
     
-    unlock();
+    //unlock();
 }
 
 void termWriteSyscall(USLOSS_Sysargs *args) {
-    //USLOSS_Console("In Write\n");
     // System Call Arguments:
     // arg1: buffer pointer
     char *buf = (char *) args->arg1;
@@ -224,7 +233,8 @@ void termWriteSyscall(USLOSS_Sysargs *args) {
     int len = (int)(long) args->arg2;
     // arg3: which terminal to read
     int unit = (int)(long) args->arg3;
-    lock();
+    //USLOSS_Console("Top of Write: %d\n", unit);
+    //lock();
     // error checking
     int charsInput;
     if (len < MAXLINE) {
@@ -234,33 +244,39 @@ void termWriteSyscall(USLOSS_Sysargs *args) {
     }
     if (charsInput <= 0 || (unit < 0 || unit > 3)) {
         args->arg4 = -1;
-        unlock();
+        //unlock();
         return;
     }
+    kernSemP(busySems[0]);
     strncpy(writeBuf[unit], buf, charsInput);
     writeLen[unit] = charsInput;
     writeIndex[unit] = 0;
 
-    kernSemP(busySems[unit]);
     int old_cr_val = 0;
     USLOSS_DeviceInput(USLOSS_TERM_DEV, unit, (void*)(long)&old_cr_val);
-        unlock();
+        //unlock();
+    //USLOSS_Console("Pre for in write: %s\n", writeBuf[unit]);
     for (int i = 0; i < len; i++) {
+        //USLOSS_Console("Top of for in write, %d: %s", unit, writeBuf[unit]);
         int thisChar;
-        //USLOSS_Console("Top of for: %d of %d\n", i, len);
+        //USLOSS_Console("Top of for: %s", writeBuf[unit]);//%d of %d\n", i, len);
         int cr_val = 0x1; // this turns on the ’send char’ bit (USLOSS spec page 9)
         cr_val |= 0x0; // recv int enable
         cr_val |= 0x4; // xmit int enable
         cr_val |= (writeBuf[unit][i] << 8); // the character to send
+        //USLOSS_Console("Pre ");
         USLOSS_DeviceOutput(USLOSS_TERM_DEV, unit, (void*)(long)cr_val);
-        //USLOSS_Console("Pre recv in write: %c\n", cr_val>>8);
+        //USLOSS_Console("Mid ");
+        //USLOSS_Console("Pre recv in write: %c in %d\n", cr_val>>8, unit);
         // block until write is complete
         MboxRecv(writeMbox[unit], &thisChar, 1);
-        //USLOSS_Console("Post recv in write\n");
+        //USLOSS_Console("\tPost recv in write: %c\n", thisChar);
+        //USLOSS_Console("Post\n");
     }
+    writeIndex[unit] = 0;
     //USLOSS_Console("After for\n");
     USLOSS_DeviceOutput(USLOSS_TERM_DEV, unit, (void*)(long)old_cr_val);
-    kernSemV(busySems[unit]);
+    kernSemV(busySems[0]);
 
     args->arg4 = (void *)0;
     //USLOSS_Console("End of write\n");
@@ -323,12 +339,31 @@ void handle_one_terminal_interrupt(int unit, int status) {
     //USLOSS_Console("Top of Handle One: %x, unit %d\n", status, unit);
     // if recv is ready
     if (USLOSS_TERM_STAT_RECV(status) == USLOSS_DEV_BUSY) {
-        //USLOSS_Console("In handle one, upper upper if: %d\n", unit);
+        //USLOSS_Console("In handle one, upper upper if: %c\n", USLOSS_TERM_STAT_CHAR(status));
         // Read character from status
-        char c = USLOSS_TERM_STAT_CHAR(status);
+        TermBuf thisBuf = termBufs[unit];
         // place character in buffer and wake up waiting process
-        // USLOSS_Console("Sending character\n");
-        MboxSend(readMbox[unit], &c, sizeof(char));
+        //USLOSS_Console("Sending character: %d\n", thisBuf.bufI);
+        char c = USLOSS_TERM_STAT_CHAR(status);
+        if (termBufs[unit].bufIs[termBufs[unit].whichBuf] >= MAXLINE || c == '\n') {
+            //USLOSS_Console("Send in handle one: %d\n", c);
+            MboxSend(readReadyMbox[unit], NULL, 0);
+            //USLOSS_Console("Send 2 in handle one: %d\n", termBufs[unit].bufIs[termBufs[unit].whichBuf]);
+            for (int i = 0; i < termBufs[unit].bufIs[termBufs[unit].whichBuf]; i++) {
+                //USLOSS_Console("Top of for in send in handle one: %d\n", i);
+                MboxSend(readMbox[unit], &(termBufs[unit].bufs[i][termBufs[unit].whichBuf]), sizeof(char));
+            }
+            MboxSend(readMbox[unit], &c, sizeof(char));
+            termBufs[unit].bufIs[termBufs[unit].whichBuf] = 0;
+        } else {
+            if (termBufs[unit].whichBuf < 10) {    // input is discarded if all buffers are full
+                termBufs[unit].bufs[termBufs[unit].bufIs[termBufs[unit].whichBuf]][termBufs[unit].whichBuf] = c;
+                termBufs[unit].bufIs[termBufs[unit].whichBuf]++;
+                if (termBufs[unit].bufIs[termBufs[unit].whichBuf] > MAXLINE) {
+                    termBufs[unit].whichBuf++; // TODO mod
+                }
+            }
+        }
     }
     //USLOSS_Console("In handle one: %c\n", status>>8);
     // if xmit is ready
@@ -407,11 +442,21 @@ void phase4_init() {
     // Create the mailboxes used in this program:
     userModeMBoxID = MboxCreate(1, 0);
     for (int i = 0; i < 4; i++) {
-        readMbox[i] = MboxCreate(MAXLINE, sizeof(char));
+        readMbox[i] = MboxCreate((MAXLINE+1)*10, sizeof(char));
         writeMbox[i] = MboxCreate(1, 1);
+        readReadyMbox[i] = MboxCreate(10, 0);
         writeIndex[i] = 0;
         kernSemCreate(1, &(busySems[i]));
     }
+
+    for (int i = 0; i < 4; i++) {
+        termBufs[i].whichBuf = 0;
+        for (int j = 0; j < 10; j++) {
+            termBufs[i].bufIs[j] = 0;
+           termBufs[i].bufs[j][MAXLINE] = '\0';
+        }
+    }
+
     // make user mode lock available to start with
     MboxSend(userModeMBoxID, NULL, 0);  
     // initialize heap size to 0
