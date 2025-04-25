@@ -170,7 +170,7 @@ void termReadSyscall(USLOSS_Sysargs *args) {
     USLOSS_DeviceInput(USLOSS_TERM_DEV, unit, &old_cr_val);
     int cr_val = 0x0; // this turns on the ’send char’ bit (USLOSS spec page 9)
     cr_val |= 0x2; // recv int enable
-    cr_val |= 0x0; // xmit int enable
+    cr_val |= 0x4; // xmit int enable
     cr_val |= (writeBuf[unit][0] << 8); // the character to send
     USLOSS_DeviceOutput(USLOSS_TERM_DEV, unit, (void*)(long)cr_val);
 
@@ -320,7 +320,7 @@ int clockDriver(void *arg) {
 }
 
 void handle_one_terminal_interrupt(int unit, int status) {
-    //USLOSS_Console("Top of Handle One: %c, unit %d\n", USLOSS_TERM_STAT_CHAR(status), unit);
+    //USLOSS_Console("Top of Handle One: %x, unit %d\n", status, unit);
     // if recv is ready
     if (USLOSS_TERM_STAT_RECV(status) == USLOSS_DEV_BUSY) {
         //USLOSS_Console("In handle one, upper upper if: %d\n", unit);
@@ -330,13 +330,14 @@ void handle_one_terminal_interrupt(int unit, int status) {
         // USLOSS_Console("Sending character\n");
         MboxSend(readMbox[unit], &c, sizeof(char));
     }
+    //USLOSS_Console("In handle one: %c\n", status>>8);
     // if xmit is ready
-    if (USLOSS_TERM_STAT_XMIT(status) == USLOSS_DEV_READY) {
-
+    if (USLOSS_TERM_STAT_XMIT(status) == USLOSS_DEV_READY && status>>8 != '\0') {
+        
         // FIXME: This is where reading terminals enter when they shouldn't,
         // causing prints that shouldn't be there.
 
-        //USLOSS_Console("Lower If Handle One: %d\n", unit);
+        //USLOSS_Console("Lower If Handle One: %d, %d\n", unit, USLOSS_TERM_STAT_XMIT(status));
         writeIndex[unit]++;
         // if a previous send has now completed a "write" op...
         if (writeIndex[unit] <= writeLen[unit]) {
@@ -350,7 +351,7 @@ void handle_one_terminal_interrupt(int unit, int status) {
             //USLOSS_Console("In handle one, lower lower if: %d\n", unit);
             // wake up a process
             int cr_val = 0;
-            cr_val = 0x1; // this turns on the ’send char’ bit (USLOSS spec page 9)
+            cr_val = 0x0; // this turns on the ’send char’ bit (USLOSS spec page 9)
             cr_val |= 0x2; // recv int enable
             cr_val |= 0x4; // xmit int enable
             cr_val |= (writeBuf[unit][writeIndex[unit]] << 8); // the character to send
@@ -364,15 +365,14 @@ int terminalDriver(void *arg) {
     int status;
     int unit = (int)(long)arg;
     while (1) {
-        USLOSS_DeviceInput(USLOSS_TERM_DEV, unit, &status);
+        //USLOSS_Console("In Terminal Driver 1: %d, %x\n", unit, status);
         //USLOSS_Console("%x ", status);
-        //USLOSS_Console("In Terminal Driver 1: %d\n", unit);
-        if (!USLOSS_TERM_STAT_RECV(status))
             waitDevice(USLOSS_TERM_DEV, unit, &status);
         //USLOSS_Console("%x ", status);
         //if (USLOSS_TERM_STAT_XMIT(status))
         //if (unit == 1) USLOSS_Console("In Terminal Driver 2: %d\n", unit);
         handle_one_terminal_interrupt(unit, status);
+        //USLOSS_DeviceOutput(USLOSS_TERM_DEV, unit, &status);
     }
 }
 
