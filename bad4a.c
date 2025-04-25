@@ -162,7 +162,6 @@ void termReadSyscall(USLOSS_Sysargs *args) {
     int len = (int)(long) args->arg2;
     // arg3: which terminal to read
     int unit = (int)(long) args->arg3;
-    lock();
     args->arg4 = 0;
 
     int charsInput;
@@ -175,7 +174,6 @@ void termReadSyscall(USLOSS_Sysargs *args) {
     // Check for errors:
     if (charsInput <= 0 || (unit < 0 || unit > 3)) {
         args->arg4 = (void *) -1;
-        unlock();
         return;
     }
     // the reader for this unit is active
@@ -199,7 +197,6 @@ void termReadSyscall(USLOSS_Sysargs *args) {
     
     // the reader is inactive
     readers[unit] = 0;
-    unlock();
 }
 
 void termWriteSyscall(USLOSS_Sysargs *args) {
