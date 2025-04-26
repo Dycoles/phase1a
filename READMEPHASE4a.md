@@ -9,3 +9,7 @@ a stack or a queue
 
 Test Case 2: All children print in the same order with the same pid and status. The only difference is mine runs a bit slower.
 It is within the 5% margin of error required by Russ, so we ought to pass the case
+
+Test Case 6: We get the correct output, but child1() appears to terminate early, likely due to some kind of race condition. 
+Other than that, the characters seem to be read correctly, so I believe our implementation for this specific test case is 
+correct. 
