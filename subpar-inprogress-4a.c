@@ -38,7 +38,7 @@ int readReadyMbox[4];
 int writeIndex[4];
 char writeBuf[4][MAXLINE];
 int writeLen[4];
-//int busySems[4];
+int busySems[4];
 
 // create a list of sleeping processes
 MinHeap sleepHeap;
@@ -171,10 +171,10 @@ void termReadSyscall(USLOSS_Sysargs *args) {
     // arg3: which terminal to read
     int unit = (int)(long) args->arg3;
 
-    lock();
+    //lock();
     args->arg4 = 0;
 
-    //kernSemP(busySems[0]);
+    kernSemP(busySems[unit]);
     int old_cr_val = 0;
     USLOSS_DeviceInput(USLOSS_TERM_DEV, unit, &old_cr_val);
     int cr_val = 0x0; // this turns on the ’send char’ bit (USLOSS spec page 9)
@@ -193,18 +193,18 @@ void termReadSyscall(USLOSS_Sysargs *args) {
     // Check for errors:
     if (charsInput <= 0 || (unit < 0 || unit > 3)) {
         args->arg4 = -1;
-        unlock();
-        //kernSemV(busySems[0]);
+        //unlock();
+        kernSemV(busySems[unit]);
         return;
     }
 
     MboxRecv(readReadyMbox[unit], NULL, 0);
     int i = 0;
     for (i; i < charsInput; i++) {
+        //USLOSS_Console("Read one: %d, %d, %d\n", unit, i, charsInput);
         if (MboxRecv(readMbox[unit], &readBuffer[i], sizeof(char)) < 0) {
             args->arg4 = (void *) -1;
-            //kernSemV(busySems[0]);
-            unlock();
+            kernSemV(busySems[unit]);
             return;
         }
         //USLOSS_Console("Characters read: %d, %d\n", i, readBuffer[i]);
@@ -221,9 +221,9 @@ void termReadSyscall(USLOSS_Sysargs *args) {
     args->arg2 = (void *)(long) i;
     args->arg4 = (void *) 0;
     USLOSS_DeviceOutput(USLOSS_TERM_DEV, unit, (void*)(long)old_cr_val);
-    //kernSemV(busySems[0]);
+    kernSemV(busySems[unit]);
     
-    unlock();
+    //unlock();
 }
 
 void termWriteSyscall(USLOSS_Sysargs *args) {
@@ -235,7 +235,7 @@ void termWriteSyscall(USLOSS_Sysargs *args) {
     // arg3: which terminal to read
     int unit = (int)(long) args->arg3;
     //USLOSS_Console("Top of Write: %d\n", unit);
-    lock();
+    //lock();
     // error checking
     int charsInput;
     if (len < MAXLINE) {
@@ -245,19 +245,20 @@ void termWriteSyscall(USLOSS_Sysargs *args) {
     }
     if (charsInput <= 0 || (unit < 0 || unit > 3)) {
         args->arg4 = -1;
-        unlock();
+        //unlock();
         return;
     }
-    //kernSemP(busySems[0]);
+    kernSemP(busySems[unit]);
     strncpy(writeBuf[unit], buf, charsInput);
     writeLen[unit] = charsInput;
     writeIndex[unit] = 0;
 
-    int old_cr_val = 0;
-    USLOSS_DeviceInput(USLOSS_TERM_DEV, unit, (void*)(long)&old_cr_val);
+    int old_cr_val;
+    USLOSS_DeviceInput(USLOSS_TERM_DEV, unit, &old_cr_val);
         //unlock();
-    //USLOSS_Console("Pre for in write: %s\n", writeBuf[unit]);
+    //USLOSS_Console("Pre for in write: %d\n", old_cr_val);
     for (int i = 0; i < len; i++) {
+        //USLOSS_Console("Write one: %d\n", unit);
         //USLOSS_Console("Top of for in write, %d: %s", unit, writeBuf[unit]);
         int thisChar;
         //USLOSS_Console("Top of for: %s", writeBuf[unit]);//%d of %d\n", i, len);
@@ -277,11 +278,10 @@ void termWriteSyscall(USLOSS_Sysargs *args) {
     writeIndex[unit] = 0;
     //USLOSS_Console("After for\n");
     USLOSS_DeviceOutput(USLOSS_TERM_DEV, unit, (void*)(long)old_cr_val);
-    unlock();
-    //kernSemV(busySems[0]);
+    kernSemV(busySems[unit]);
 
     args->arg4 = (void *)0;
-    //USLOSS_Console("End of write\n");
+    //USLOSS_Console("End of write: %x\n", old_cr_val);
 }
 
 // To implement in phase 4b
@@ -338,56 +338,45 @@ int clockDriver(void *arg) {
 }
 
 void handle_one_terminal_interrupt(int unit, int status) {
-    USLOSS_Console("Top of Handle One: %x, unit %d\n", status, unit);
+    //USLOSS_Console("Top of handle one: %d, %c", unit, status>>8);
     // if recv is ready
-    
+    if (USLOSS_TERM_STAT_RECV(status) == USLOSS_DEV_BUSY) {
+        // Read character from status
+        TermBuf thisBuf = termBufs[unit];
+        // place character in buffer and wake up waiting process
         char c = USLOSS_TERM_STAT_CHAR(status);
+        if (termBufs[unit].bufIs[termBufs[unit].whichBuf] >= MAXLINE || c == '\n') {
+            //USLOSS_Console("Send in handle one: %d\n", c);
+            MboxSend(readReadyMbox[unit], NULL, 0);
+            //USLOSS_Console("Send 2 in handle one: %d\n", termBufs[unit].bufIs[termBufs[unit].whichBuf]);
+            for (int i = 0; i < termBufs[unit].bufIs[termBufs[unit].whichBuf]; i++) {
+                //USLOSS_Console("Top of for in send in handle one: %d < %d\n", i, termBufs[unit].bufIs[termBufs[unit].whichBuf]);
+                MboxSend(readMbox[unit], &(termBufs[unit].bufs[i][termBufs[unit].whichBuf]), sizeof(char));
+            }
+            MboxSend(readMbox[unit], &c, sizeof(char));
+            termBufs[unit].bufIs[termBufs[unit].whichBuf] = 0;
+        } else {
+            //USLOSS_Console("Overwrite in handle one, %d ", termBufs[unit].bufIs[termBufs[unit].whichBuf]);
             if (termBufs[unit].whichBuf < 10) {    // input is discarded if all buffers are full
-                USLOSS_Console("Buf: %d, %c\n", unit, c);
                 termBufs[unit].bufs[termBufs[unit].bufIs[termBufs[unit].whichBuf]][termBufs[unit].whichBuf] = c;
                 termBufs[unit].bufIs[termBufs[unit].whichBuf]++;
                 if (termBufs[unit].bufIs[termBufs[unit].whichBuf] > MAXLINE) {
                     termBufs[unit].whichBuf++; // TODO mod
                 }
             }
-    if (USLOSS_TERM_STAT_RECV(status) == USLOSS_DEV_BUSY) {
-        //USLOSS_Console("In handle one, upper upper if: %c, %d\n", USLOSS_TERM_STAT_CHAR(status), unit);
-        // Read character from status
-        TermBuf thisBuf = termBufs[unit];
-        // place character in buffer and wake up waiting process
-        //USLOSS_Console("Sending character: %d\n", thisBuf.bufI);
-        if (termBufs[unit].bufIs[termBufs[unit].whichBuf] >= MAXLINE || c == '\n') {
-            //USLOSS_Console("Send in handle one: %d\n", c);
-            MboxSend(readReadyMbox[unit], NULL, 0);
-            //USLOSS_Console("Send 2 in handle one: %d\n", termBufs[unit].bufIs[termBufs[unit].whichBuf]);
-            for (int i = 0; i < termBufs[unit].bufIs[termBufs[unit].whichBuf]; i++) {
-                //USLOSS_Console("Top of for in send in handle one: %c, %d, %d\n",termBufs[unit].bufs[i][termBufs[unit].whichBuf], i, unit);
-                MboxSend(readMbox[unit], &(termBufs[unit].bufs[i][termBufs[unit].whichBuf]), sizeof(char));
-            }
-            MboxSend(readMbox[unit], &c, sizeof(char));
-            termBufs[unit].bufIs[termBufs[unit].whichBuf] = 0;
-        } else {
+            //USLOSS_Console("then %d\n", termBufs[unit].bufIs[termBufs[unit].whichBuf]);
         }
     }
-    //USLOSS_Console("In handle one: %c\n", status>>8);
     // if xmit is ready
     if (USLOSS_TERM_STAT_XMIT(status) == USLOSS_DEV_READY && status>>8 != '\0') {
-        
-        // FIXME: This is where reading terminals enter when they shouldn't,
-        // causing prints that shouldn't be there.
-
-        //USLOSS_Console("Lower If Handle One: %d, %d\n", unit, USLOSS_TERM_STAT_XMIT(status));
         writeIndex[unit]++;
         // if a previous send has now completed a "write" op...
         if (writeIndex[unit] <= writeLen[unit]) {
-            //USLOSS_Console("In handle one, upper lower if: %d\n", writeMbox[unit]);
             // if some buffer is waiting to be flushed
             // send a single character
-            //USLOSS_Console("%c\n", status>>8);
             char charToSend = status>>8;
             MboxSend(writeMbox[unit], &charToSend, 1);
         } else {
-            //USLOSS_Console("In handle one, lower lower if: %d\n", unit);
             // wake up a process
             int cr_val = 0;
             cr_val = 0x0; // this turns on the ’send char’ bit (USLOSS spec page 9)
@@ -404,12 +393,12 @@ int terminalDriver(void *arg) {
     int status;
     int unit = (int)(long)arg;
     while (1) {
-        USLOSS_Console("In Terminal Driver 1: %d, %x\n", unit, status);
+        //USLOSS_Console("In Terminal Driver 1: %d, %x\n", unit, status);
         //USLOSS_Console("%x ", status);
             waitDevice(USLOSS_TERM_DEV, unit, &status);
         //USLOSS_Console("%x ", status);
         //if (USLOSS_TERM_STAT_XMIT(status))
-        //if (unit == 1) USLOSS_Console("In Terminal Driver 2: %d\n", unit);
+        //USLOSS_Console("In Terminal Driver 2: %d\n", unit);
         handle_one_terminal_interrupt(unit, status);
         //USLOSS_DeviceOutput(USLOSS_TERM_DEV, unit, &status);
     }
@@ -450,7 +439,7 @@ void phase4_init() {
         writeMbox[i] = MboxCreate(1, 1);
         readReadyMbox[i] = MboxCreate(10, 0);
         writeIndex[i] = 0;
-        //kernSemCreate(1, &(busySems[i]));
+        kernSemCreate(1, &(busySems[i]));
     }
 
     for (int i = 0; i < 4; i++) {
