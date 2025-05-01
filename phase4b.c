@@ -33,11 +33,18 @@ typedef struct {
 } TermBuf;
 
 typedef struct {
+    // 0 for read op, 1 for write op
+    int op;
+    // buffer
     char *buf;
-    int startPos;                                                                                               
-    int len;
-    // progress in getting through len
-    int so_far;
+    // starting track number
+    int track;
+    // number of sectors to read/write
+    int sectors;
+    // starting block number
+    int firstBlock;
+    // how many blocks we have looked at so far
+    int blocks_so_far;
     // mailbox for this request
     int mboxID;
     // returned result
@@ -47,21 +54,24 @@ typedef struct {
 typedef struct {
     // keep track of processes requests
     DiskRequest queue[MAXPROC];
+    // current index in queue
     int head;
+    // direction for elevator scan algorithm
     int dir;
+    // how many requests in queue
     int count;
-} DiskQueue;
-
-typedef struct {
+    // request for Disk
     USLOSS_DeviceRequest req;
-    // other fields
-    int tracks; // number of tracks (used for diskSize)
-} DiskState;
+    // number of tracks in Disk
+    int tracks;
+    // 0 for not busy, 1 for busy
+    int busy;
+} DiskQueue;
 
 // keep track of request queue for 2 disks
 DiskQueue diskQ[2];
-// keep track of disk state for 2 disks
-DiskState disks[2];
+// keep track of mailboxes for diskSize
+int diskSizeMbox[2];
 
 int readMbox[4];
 int writeMbox[4];
@@ -318,39 +328,42 @@ void termWriteSyscall(USLOSS_Sysargs *args) {
 // To implement in phase 4b
 void diskSizeSyscall(USLOSS_Sysargs *args) {
     int unit = (int)(long) args->arg1;
-    
-    int blockSize;
-    int blockNum;
-    int trackNum;
     if (unit < 0 || unit > 1) {
-        args->arg1 = blockSize;
-        args->arg2 = blockNum;
-        args->arg3 = trackNum;
         args->arg4 = (void *) -1;
         return;
     }
     // successful input, perform operation
     // set req operations and registers
-    disks[unit].req.opr = USLOSS_DISK_TRACKS;
-    disks[unit].req.reg1 = &disks[unit].tracks;
-    disks[unit].req.reg2 = NULL;
+    lock();
+    diskQ[unit].req.opr = USLOSS_DISK_TRACKS;
+    diskQ[unit].req.reg1 = &diskQ[unit].tracks;
+    diskQ[unit].req.reg2 = NULL;
+    // disk is now busy
+    diskQ[unit].busy = 1;
     // get device output
-    USLOSS_DeviceOutput(USLOSS_DISK_DEV, unit, &disks[unit].req);
-    // unblock on recv
+    USLOSS_DeviceOutput(USLOSS_DISK_DEV, unit, &diskQ[unit].req);
+    unlock();
 
+    int trackNum;
+    // block until driver gives us track size
+    MboxRecv(diskSizeMbox[unit], &trackNum, sizeof(trackNum));
     // return to user
-    args->arg1 = blockSize;
-    args->arg2 = blockNum;
-    args->arg3 = trackNum;
-    args->arg4 = (void *) 0;
+    args->arg1 = (void*)(long)512;
+    args->arg2 = (void*)(long)16;
+    args->arg3 = (void*)(long)trackNum;
+    args->arg4 = (void*)(long) 0;
 }
 
 // To implement in phase 4b
 void diskReadSyscall(USLOSS_Sysargs *args) {
     char *buf = (char *) args->arg1;
-    int sectorNum = args->arg2;
-    int trackNum = args->arg3;
-    int blockNum = args->arg4;
+    // number of sectors to read
+    int sectors = args->arg2;
+    // starting track number
+    int track = args->arg3;
+    // starting block number
+    int block = args->arg4;
+    // which disk to access
     int unit = args->arg5;
 
     // get disk status register
@@ -358,14 +371,13 @@ void diskReadSyscall(USLOSS_Sysargs *args) {
     int retval;
     retval = USLOSS_DeviceInput(USLOSS_DISK_DEV, unit, &status);
     lock();
-    if (unit < 0 || unit > 1 || sectorNum < 0 || trackNum < 0 || blockNum < 0) {
+    if (unit < 0 || unit > 1 || sectors < 0 || track < 0 || block < 0) {
         args->arg4 = (void *) -1;
         // return disk status register
         args->arg1 = (void *) retval;
     } else {
         // successful input, perform operation
         args->arg4 = (void *) 0;
-        // return disk status register
         args->arg1 = (void *) retval;
     }
     unlock();
@@ -374,9 +386,13 @@ void diskReadSyscall(USLOSS_Sysargs *args) {
 // To implement in phase 4b
 void diskWriteSyscall(USLOSS_Sysargs *args) {
     char *buf = (char *) args->arg1;
-    int sectorNum = args->arg2;
-    int trackNum = args->arg3;
-    int blockNum = args->arg4;
+    // number of sectors to read
+    int sectors = args->arg2;
+    // starting track number
+    int track = args->arg3;
+    // starting block number
+    int block = args->arg4;
+    // which disk to access
     int unit = args->arg5;
 
     // get disk status register
@@ -384,7 +400,7 @@ void diskWriteSyscall(USLOSS_Sysargs *args) {
     int retval;
     retval = USLOSS_DeviceInput(USLOSS_DISK_DEV, unit, &status);
     lock();
-    if (unit < 0 || unit > 1 || sectorNum < 0 || trackNum < 0 || blockNum < 0) {
+    if (unit < 0 || unit > 1 || sectors < 0 || track < 0 || block < 0) {
         args->arg4 = (void *) -1;
         // return disk status register
         args->arg1 = (void *) retval;
@@ -481,7 +497,15 @@ int terminalDriver(void *arg) {
 }
 
 void handle_disk_interrupt(int unit, int status) {
-
+    int statReg;
+    USLOSS_DeviceInput(USLOSS_DISK_DEV, unit, &statReg);
+    if (diskQ[unit].req.opr == USLOSS_DISK_TRACKS && diskQ[unit].busy == 1) {
+        // we are doing a tracks size operation
+        MboxSend(diskSizeMbox[unit], &diskQ[unit].tracks, sizeof(diskQ[unit].tracks));
+        diskQ[unit].busy = 0;
+    } else {
+        // we are doing a read/write operation
+    }
 }
 
 int diskDriver(void *arg) {
@@ -490,7 +514,9 @@ int diskDriver(void *arg) {
     while(1) {
         waitDevice(USLOSS_DISK_DEV, unit, &status);
         // whatToDo(Prev op)
+        lock();
         handle_disk_interrupt(unit, status);
+        unlock();
         // whatNext
     }
 }
@@ -533,6 +559,10 @@ void phase4_init() {
             termBufs[i].bufIs[j] = 0;
            termBufs[i].bufs[j][MAXLINE] = '\0';
         }
+    }
+    for (int i = 0; i < 2; i++) {
+        diskSizeMbox[i] = MboxCreate(1, sizeof(int));
+        diskQ[i].busy = 0;
     }
 
     // make user mode lock available to start with
