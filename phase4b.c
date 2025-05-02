@@ -57,8 +57,6 @@ typedef struct {
     DiskRequest *curRequest;
     // current index in queue
     int head;
-    // direction for elevator scan algorithm
-    int dir;
     // how many requests in queue
     int count;
     // request for Disk
@@ -67,6 +65,8 @@ typedef struct {
     int tracks;
     // 0 for not busy, 1 for busy
     int busy;
+    // current track
+    int curTrack;
 } DiskQueue;
 
 // keep track of request queue for 2 disks
@@ -370,12 +370,15 @@ void diskReadSyscall(USLOSS_Sysargs *args) {
     int unit = args->arg5;
 
     // get disk status register
-    lock();
-    if (unit < 0 || unit > 1 || sectors < 0 || track < 0 || block < 0) {
+    if (unit < 0 || unit > 1 || sectors <= 0 || track < 0 || block < 0 || block >= 16) {
         args->arg4 = (void *) -1;
+        args->arg1 = USLOSS_DEV_ERROR;
+        return;
     }
     // successful input, perform operation
-    DiskRequest *request;
+    lock();
+    int index = (diskQ[unit].head + diskQ[unit].count) % MAXPROC;
+    DiskRequest *request = &diskQ[unit].queue[index];
     // fill out parameters of current request
     request->op = 0; // 0 for read op
     request->buf = buf;
@@ -385,10 +388,7 @@ void diskReadSyscall(USLOSS_Sysargs *args) {
     request->blocks_so_far = 0;
     request->mboxID = MboxCreate(1, sizeof(int));
     request->result = 0;
-    // add request to disk queue
-    lock();
-    // add request to queue
-
+    diskQ[unit].count++;
     // if busy flag not set, start request
     if (!diskQ[unit].busy) {
         startRequest(unit);
@@ -398,9 +398,8 @@ void diskReadSyscall(USLOSS_Sysargs *args) {
     int status;
     MboxRecv(request->mboxID, &status, sizeof(status));
     // fill in return values
-    args->arg4 = (void *) 0;
-    args->arg1 = (void *) status;
-    unlock();
+    args->arg4 = (void *)(long) 0;
+    args->arg1 = (void *)(long) status;
 }
 
 // To implement in phase 4b
@@ -416,12 +415,15 @@ void diskWriteSyscall(USLOSS_Sysargs *args) {
     int unit = args->arg5;
 
     // get disk status register
-    lock();
-    if (unit < 0 || unit > 1 || sectors < 0 || track < 0 || block < 0) {
+    if (unit < 0 || unit > 1 || sectors <= 0 || track < 0 || block < 0 || block >= 16) {
         args->arg4 = (void *) -1;
+        args->arg1 = USLOSS_DEV_ERROR;
+        return;
     }
     // successful input, perform operation
-    DiskRequest *request;
+    lock();
+    int index = (diskQ[unit].head + diskQ[unit].count) % MAXPROC;
+    DiskRequest *request = &diskQ[unit].queue[index];
     // fill out parameters of current request
     request->op = 1; // 1 for write op
     request->buf = buf;
@@ -431,10 +433,7 @@ void diskWriteSyscall(USLOSS_Sysargs *args) {
     request->blocks_so_far = 0;
     request->mboxID = MboxCreate(1, sizeof(int));
     request->result = 0;
-    // add request to disk queue
-    lock();
-    // add request to queue
-
+    diskQ[unit].count++;
     // if busy flag not set, start request
     if (!diskQ[unit].busy) {
         startRequest(unit);
@@ -442,11 +441,10 @@ void diskWriteSyscall(USLOSS_Sysargs *args) {
     unlock();
     // block until driver sends status register
     int status;
-    MboxRecv(request->mboxID, &status, sizeof(status));
+    int retval = MboxRecv(request->mboxID, &status, sizeof(status));
     // fill in return values
-    args->arg4 = (void *) 0;
-    args->arg1 = (void *) status;
-    unlock();
+    args->arg4 = (void *)(long) 0;
+    args->arg1 = (void *)(long) status;
 }
 
 int clockDriver(void *arg) {
@@ -539,14 +537,31 @@ void startRequest(int unit) {
         return;
     }
     // C-SCAN Algorithm to find request
-    int index;
-    int dist;
-    int curTrack;
+    int index = -1;
+    int curTrack = diskQ[unit].curTrack;
+    // get closest request in forward direction
     for (int i = 0; i < diskQ[unit].count; i++) {
-
+        int j = (diskQ[unit].head + i) % MAXPROC;
+        int track = diskQ[unit].queue[j].track;
+        if (track >= curTrack) {
+            if (index == -1 || track < diskQ[unit].queue[index].track) {
+                index = j;
+            }
+        }
     }
-
-    diskQ[unit].curRequest = &diskQ[unit].queue[diskQ[unit].head];
+    // loop to beginning of track and find request in forward direction if request not found
+    if (index == -1) {
+        for (int i = 0; i < diskQ[unit].count; i++) {
+            int j = (diskQ[unit].head + i) % MAXPROC;
+            int track = diskQ[unit].queue[j].track;
+            if (index == -1 || track < diskQ[unit].queue[index].track) {
+                index = j;
+            }
+        }
+    }
+    diskQ[unit].head = index;
+    // cur request should be the index we find in c-scan
+    diskQ[unit].curRequest = &diskQ[unit].queue[index];
     diskQ[unit].busy = 1;
     // perform seek operation
     diskQ[unit].req.opr = USLOSS_DISK_SEEK;
@@ -563,13 +578,58 @@ void handle_disk_interrupt(int unit, int status) {
         MboxSend(diskSizeMbox[unit], &diskQ[unit].tracks, sizeof(diskQ[unit].tracks));
         diskQ[unit].busy = 0;
     } else {
-        // we are doing a read/write operation
+        // we are doing a read/write op
+        if (diskQ[unit].req.opr == USLOSS_DISK_SEEK) {
+            // seek done, update track
+            diskQ[unit].curTrack = diskQ[unit].curRequest->track;
+            if (diskQ[unit].curRequest->op == 0) {
+                // read op
+                diskQ[unit].req.opr = USLOSS_DISK_READ;
+            } else {
+                // write op (op == 1)
+                diskQ[unit].req.opr = USLOSS_DISK_WRITE;
+            }
+            // send request
+            int block = diskQ[unit].curRequest->firstBlock + diskQ[unit].curRequest->blocks_so_far;
+            char *buf = diskQ[unit].curRequest->buf + diskQ[unit].curRequest->blocks_so_far * 512;
+            diskQ[unit].req.reg1 = block;
+            diskQ[unit].req.reg2 = buf;
+            USLOSS_DeviceOutput(USLOSS_DISK_DEV, unit, &diskQ[unit].req);
+        } else if (diskQ[unit].req.opr == USLOSS_DISK_READ || diskQ[unit].req.opr == USLOSS_DISK_WRITE) {
+            // perform read/write op
+            diskQ[unit].curRequest->blocks_so_far++;
+            if (diskQ[unit].curRequest->blocks_so_far < diskQ[unit].curRequest->sectors) {
+                // schedule next sector
+                if (diskQ[unit].curRequest->op == 0) {
+                    // read op
+                    diskQ[unit].req.opr = USLOSS_DISK_READ;
+                } else {
+                    // write op (op == 1)
+                    diskQ[unit].req.opr = USLOSS_DISK_WRITE;
+                }
+                // send request
+                int block = diskQ[unit].curRequest->firstBlock + diskQ[unit].curRequest->blocks_so_far;
+                char *buf = diskQ[unit].curRequest->buf + diskQ[unit].curRequest->blocks_so_far * 512;
+                diskQ[unit].req.reg1 = block;
+                diskQ[unit].req.reg2 = buf;
+                USLOSS_DeviceOutput(USLOSS_DISK_DEV, unit, &diskQ[unit].req);
+            } else {
+                // request complete, unblock and return result to syscall
+                MboxSend(diskQ[unit].curRequest->mboxID, &statReg, sizeof(int));
+                // remove request from queue
+                diskQ[unit].busy = 0;
+                diskQ[unit].head = (diskQ[unit].head + 1) % MAXPROC;
+                diskQ[unit].count--;
+                // start next request
+                startRequest(unit);
+            }
+        }
     }
 }
 
 int diskDriver(void *arg) {
     int status;
-    int unit = (int)(long)arg;
+    int unit = (int)(long)arg;    
     while(1) {
         waitDevice(USLOSS_DISK_DEV, unit, &status);
         // whatToDo(Prev op)
@@ -622,6 +682,7 @@ void phase4_init() {
     for (int i = 0; i < 2; i++) {
         diskSizeMbox[i] = MboxCreate(1, sizeof(int));
         diskQ[i].busy = 0;
+        diskQ[i].curTrack = 0;
     }
 
     // make user mode lock available to start with
