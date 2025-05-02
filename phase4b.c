@@ -77,7 +77,6 @@ int diskSizeMbox[2];
 int readMbox[4];
 int writeMbox[4];
 int readReadyMbox[4];
-int writeReadyMbox[4];
 int writeIndex[4];
 char writeBuf[4][MAXLINE];
 int writeLen[4];
@@ -397,8 +396,7 @@ void diskReadSyscall(USLOSS_Sysargs *args) {
     unlock();
     // block until driver sends status register
     int status;
-    int requestmbox;
-    MboxRecv(requestmbox, &status, sizeof(status));
+    MboxRecv(request->mboxID, &status, sizeof(status));
     // fill in return values
     args->arg4 = (void *) 0;
     args->arg1 = (void *) status;
@@ -444,8 +442,7 @@ void diskWriteSyscall(USLOSS_Sysargs *args) {
     unlock();
     // block until driver sends status register
     int status;
-    int requestmbox;
-    MboxRecv(requestmbox, &status, sizeof(status));
+    MboxRecv(request->mboxID, &status, sizeof(status));
     // fill in return values
     args->arg4 = (void *) 0;
     args->arg1 = (void *) status;
@@ -537,9 +534,18 @@ int terminalDriver(void *arg) {
 }
 
 void startRequest(int unit) {
+    // check to see if there are items in the queue
     if (diskQ[unit].count == 0) {
         return;
     }
+    // C-SCAN Algorithm to find request
+    int index;
+    int dist;
+    int curTrack;
+    for (int i = 0; i < diskQ[unit].count; i++) {
+
+    }
+
     diskQ[unit].curRequest = &diskQ[unit].queue[diskQ[unit].head];
     diskQ[unit].busy = 1;
     // perform seek operation
@@ -600,9 +606,8 @@ void phase4_init() {
     userModeMBoxID = MboxCreate(1, 0);
     for (int i = 0; i < 4; i++) {
         readMbox[i] = MboxCreate((MAXLINE+1)*10, sizeof(char));
-        writeMbox[i] = MboxCreate(80, 1);
+        writeMbox[i] = MboxCreate(1, 1);
         readReadyMbox[i] = MboxCreate(10, 0);
-        writeReadyMbox[i] = MboxCreate(10, 0);
         writeIndex[i] = 0;
         kernSemCreate(1, &(busySems[i]));
     }
