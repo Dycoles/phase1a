@@ -592,6 +592,7 @@ void startRequest(int unit) {
 }
 
 void handle_disk_interrupt(int unit, int status) {
+    // USLOSS_Console("Handling disk interrupt. The disk's status is %d\n", status);
     if (status == USLOSS_DEV_ERROR) {
         MboxSend(diskQ[unit].curRequest->mboxID, &status, sizeof(int));
         diskQ[unit].busy = 0;
@@ -601,7 +602,6 @@ void handle_disk_interrupt(int unit, int status) {
         return;
     }
 
-    // USLOSS_Console("Handling disk interrupt. The disk's status is %d\n", status);
     if (diskQ[unit].req.opr == USLOSS_DISK_TRACKS && diskQ[unit].busy == 1) {
         // we are doing a tracks size operation
         MboxSend(diskSizeMbox[unit], &diskQ[unit].tracks, sizeof(diskQ[unit].tracks));
@@ -633,6 +633,16 @@ void handle_disk_interrupt(int unit, int status) {
             diskQ[unit].curRequest->blocks_so_far++;
             // USLOSS_Console("Blocks so far: %d\n", diskQ[unit].curRequest->blocks_so_far);
             // USLOSS_Console("Sectors: %d\n", diskQ[unit].curRequest->sectors);
+            int totalBlocks = diskQ[unit].curRequest->blocks_so_far + diskQ[unit].curRequest->firstBlock;
+            // check to see if it is time to switch tracks
+            if (totalBlocks >= 16) {
+                // switch to next track
+                diskQ[unit].curRequest->track++;
+                // get new first block
+                diskQ[unit].curRequest->firstBlock = totalBlocks-16;
+                // reset blocks so far
+                diskQ[unit].curRequest->blocks_so_far = 0;
+            }
             if (diskQ[unit].curRequest->blocks_so_far < diskQ[unit].curRequest->sectors) {
                 // schedule next sector
                 if (diskQ[unit].curRequest->op == 0) {
@@ -721,6 +731,8 @@ void phase4_init() {
         diskSizeMbox[i] = MboxCreate(1, sizeof(int));
         diskQ[i].busy = 0;
         diskQ[i].curTrack = 0;
+        diskQ[i].count = 0;
+        diskQ[i].head = 0;
         diskQsem[i] = 0;
         kernSemCreate(1, &diskQsem);
     }
