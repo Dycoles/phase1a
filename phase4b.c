@@ -54,6 +54,7 @@ typedef struct {
 typedef struct {
     // keep track of processes requests
     DiskRequest queue[MAXPROC];
+    DiskRequest *curRequest;
     // current index in queue
     int head;
     // direction for elevator scan algorithm
@@ -367,19 +368,37 @@ void diskReadSyscall(USLOSS_Sysargs *args) {
     int unit = args->arg5;
 
     // get disk status register
-    int status;
-    int retval;
-    retval = USLOSS_DeviceInput(USLOSS_DISK_DEV, unit, &status);
     lock();
     if (unit < 0 || unit > 1 || sectors < 0 || track < 0 || block < 0) {
         args->arg4 = (void *) -1;
-        // return disk status register
-        args->arg1 = (void *) retval;
-    } else {
-        // successful input, perform operation
-        args->arg4 = (void *) 0;
-        args->arg1 = (void *) retval;
     }
+    // successful input, perform operation
+    DiskRequest *request;
+    // fill out parameters of current request
+    request->op = 0; // 0 for read op
+    request->buf = buf;
+    request->track = track;
+    request->sectors = sectors;
+    request->firstBlock = block;
+    request->blocks_so_far = 0;
+    request->mboxID = MboxCreate(1, sizeof(int));
+    request->result = 0;
+    // add request to disk queue
+    lock();
+    // add request to queue
+
+    // if busy flag not set, start request
+    if (!diskQ[unit].busy) {
+        startRequest(unit);
+    }
+    unlock();
+    // block until driver sends status register
+    int status;
+    int requestmbox;
+    MboxRecv(requestmbox, &status, sizeof(status));
+    // fill in return values
+    args->arg4 = (void *) 0;
+    args->arg1 = (void *) status;
     unlock();
 }
 
@@ -396,19 +415,37 @@ void diskWriteSyscall(USLOSS_Sysargs *args) {
     int unit = args->arg5;
 
     // get disk status register
-    int status;
-    int retval;
-    retval = USLOSS_DeviceInput(USLOSS_DISK_DEV, unit, &status);
     lock();
     if (unit < 0 || unit > 1 || sectors < 0 || track < 0 || block < 0) {
         args->arg4 = (void *) -1;
-        // return disk status register
-        args->arg1 = (void *) retval;
-    } else {
-        // successful input, perform operation
-        args->arg4 = (void *) 0;
-        args->arg1 = (void *) retval;
     }
+    // successful input, perform operation
+    DiskRequest *request;
+    // fill out parameters of current request
+    request->op = 1; // 1 for write op
+    request->buf = buf;
+    request->track = track;
+    request->sectors = sectors;
+    request->firstBlock = block;
+    request->blocks_so_far = 0;
+    request->mboxID = MboxCreate(1, sizeof(int));
+    request->result = 0;
+    // add request to disk queue
+    lock();
+    // add request to queue
+
+    // if busy flag not set, start request
+    if (!diskQ[unit].busy) {
+        startRequest(unit);
+    }
+    unlock();
+    // block until driver sends status register
+    int status;
+    int requestmbox;
+    MboxRecv(requestmbox, &status, sizeof(status));
+    // fill in return values
+    args->arg4 = (void *) 0;
+    args->arg1 = (void *) status;
     unlock();
 }
 
@@ -485,15 +522,22 @@ int terminalDriver(void *arg) {
     int status;
     int unit = (int)(long)arg;
     while (1) {
-        //USLOSS_Console("In Terminal Driver 1: %d, %x\n", unit, status);
-        //USLOSS_Console("%x ", status);
         waitDevice(USLOSS_TERM_DEV, unit, &status);
-        //USLOSS_Console("%x ", status);
-        //if (USLOSS_TERM_STAT_XMIT(status))
-        //USLOSS_Console("In Terminal Driver 2: %d\n", unit);
         handle_one_terminal_interrupt(unit, status);
-        //USLOSS_DeviceOutput(USLOSS_TERM_DEV, unit, &status);
     }
+}
+
+void startRequest(int unit) {
+    if (diskQ[unit].count == 0) {
+        return;
+    }
+    diskQ[unit].curRequest = &diskQ[unit].queue[diskQ[unit].head];
+    diskQ[unit].busy = 1;
+    // perform seek operation
+    diskQ[unit].req.opr = USLOSS_DISK_SEEK;
+    diskQ[unit].req.reg1 = (void*)(long)diskQ[unit].curRequest->track;
+    diskQ[unit].req.reg2 = NULL;
+    USLOSS_DeviceOutput(USLOSS_DISK_DEV, unit, &diskQ[unit].req);
 }
 
 void handle_disk_interrupt(int unit, int status) {
