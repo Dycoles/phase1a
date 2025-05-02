@@ -361,6 +361,7 @@ void diskSizeSyscall(USLOSS_Sysargs *args) {
 
 // To implement in phase 4b
 void diskReadSyscall(USLOSS_Sysargs *args) {
+    // USLOSS_Console("Read syscall begin\n");
     char *buf = (char *) args->arg1;
     // number of sectors to read
     int sectors = args->arg2;
@@ -373,10 +374,12 @@ void diskReadSyscall(USLOSS_Sysargs *args) {
 
     // get disk status register
     if (unit < 0 || unit > 1 || sectors <= 0 || track < 0 || block < 0 || block >= 16) {
+        // USLOSS_Console("Read syscall unsuccessful, end operation\n");
         args->arg4 = (void *) -1;
         args->arg1 = USLOSS_DEV_ERROR;
         return;
     }
+    // USLOSS_Console("Read syscall successful, begin operation\n");
     // successful input, perform operation
     lock();
     int index = (diskQ[unit].head + diskQ[unit].count) % MAXPROC;
@@ -397,16 +400,20 @@ void diskReadSyscall(USLOSS_Sysargs *args) {
     }
     // block until driver sends status register
     int status;
-    MboxRecv(request->mboxID, &status, sizeof(status));
+    // USLOSS_Console("Receiving status from mailbox...\n");
+    int retval = MboxRecv(request->mboxID, &status, sizeof(status));
+    // USLOSS_Console("Receiving status from mailbox: Status is %d\n", status);
     unlock();
     // fill in return values
+    // USLOSS_Console("This is the exit status of read: %d\n", status);
+    // USLOSS_Console("Finished read syscall operation\n");
     args->arg4 = (void *)(long) 0;
     args->arg1 = (void *)(long) status;
 }
 
 // To implement in phase 4b
 void diskWriteSyscall(USLOSS_Sysargs *args) {
-    USLOSS_Console("Write syscall begin\n");
+    // USLOSS_Console("Write syscall begin\n");
     char *buf = (char *) args->arg1;
     // number of sectors to read
     int sectors = args->arg2;
@@ -419,12 +426,12 @@ void diskWriteSyscall(USLOSS_Sysargs *args) {
 
     // get disk status register
     if (unit < 0 || unit > 1 || sectors <= 0 || track < 0 || block < 0 || block >= 16) {
-        USLOSS_Console("Write syscall unsuccessful, end operation\n");
+        // USLOSS_Console("Write syscall unsuccessful, end operation\n");
         args->arg4 = (void *) -1;
         args->arg1 = USLOSS_DEV_ERROR;
         return;
     }
-    USLOSS_Console("Write syscall successful, begin operation\n");
+    // USLOSS_Console("Write syscall successful, begin operation\n");
     // successful input, perform operation
     lock();
     int index = (diskQ[unit].head + diskQ[unit].count) % MAXPROC;
@@ -445,13 +452,13 @@ void diskWriteSyscall(USLOSS_Sysargs *args) {
     }
     // block until driver sends status register
     int status;
-    USLOSS_Console("Receiving status from mailbox...\n");
+    // USLOSS_Console("Receiving status from mailbox...\n");
     int retval = MboxRecv(request->mboxID, &status, sizeof(status));
-    USLOSS_Console("Receiving status from mailbox: Status is %d\n", status);
+    // USLOSS_Console("Receiving status from mailbox: Status is %d\n", status);
     unlock();
     // fill in return values
     // USLOSS_Console("This is the exit status of write: %d\n", status);
-    USLOSS_Console("Finished write syscall operation\n");
+    // USLOSS_Console("Finished write syscall operation\n");
     args->arg4 = (void *)(long) 0;
     args->arg1 = (void *)(long) status;
 }
@@ -541,7 +548,7 @@ int terminalDriver(void *arg) {
 }
 
 void startRequest(int unit) {
-    (USLOSS_Console("Start request for disk %d\n", unit));
+    // (USLOSS_Console("Start request for disk %d\n", unit));
     // check to see if there are items in the queue
     if (diskQ[unit].count == 0) {
         return;
@@ -558,7 +565,7 @@ void startRequest(int unit) {
                 index = j;
             }
         }
-        USLOSS_Console("Index is %d\n", index);
+        // USLOSS_Console("Index is %d\n", index);
     }
     // loop to beginning of track and find request in forward direction if request not found
     if (index == -1) {
@@ -568,14 +575,14 @@ void startRequest(int unit) {
             if (index == -1 || track < diskQ[unit].queue[index].track) {
                 index = j;
             }
-            USLOSS_Console("Index is %d\n", index);
+            // USLOSS_Console("Index is %d\n", index);
         }
     }
-    USLOSS_Console("Final Index is %d\n", index);
+    // USLOSS_Console("Final Index is %d\n", index);
     diskQ[unit].head = index;
     // cur request should be the index we find in c-scan
     diskQ[unit].curRequest = &diskQ[unit].queue[index];
-    USLOSS_Console("Seek Destination Track is: %d\n", diskQ[unit].curRequest->track);
+    // USLOSS_Console("Seek Destination Track is: %d\n", diskQ[unit].curRequest->track);
     diskQ[unit].busy = 1;
     // perform seek operation
     diskQ[unit].req.opr = USLOSS_DISK_SEEK;
@@ -585,10 +592,14 @@ void startRequest(int unit) {
 }
 
 void handle_disk_interrupt(int unit, int status) {
-    USLOSS_Console("Handling disk interrupt. Before device input\n");
-    int retval = USLOSS_DeviceInput(USLOSS_DISK_DEV, unit, &status);
-    USLOSS_Console("Handling disk interrupt. After device input. Status: %d\n", status);
-    USLOSS_Console("Handling disk interrupt. After device input. Retval: %d\n", retval);
+    if (status == USLOSS_DEV_ERROR) {
+        MboxSend(diskQ[unit].curRequest->mboxID, &status, sizeof(int));
+        diskQ[unit].busy = 0;
+        diskQ[unit].head = (diskQ[unit].head + 1) % MAXPROC;
+        diskQ[unit].count--;
+        startRequest(unit);
+        return;
+    }
 
     // USLOSS_Console("Handling disk interrupt. The disk's status is %d\n", status);
     if (diskQ[unit].req.opr == USLOSS_DISK_TRACKS && diskQ[unit].busy == 1) {
@@ -599,7 +610,7 @@ void handle_disk_interrupt(int unit, int status) {
         // we are doing a read/write op
         if (diskQ[unit].req.opr == USLOSS_DISK_SEEK) {
             // seek done, update track
-            USLOSS_Console("Seek done, update track\n");
+            // USLOSS_Console("Seek done, update track\n");
             diskQ[unit].curTrack = diskQ[unit].curRequest->track;
             if (diskQ[unit].curRequest->op == 0) {
                 // read op
@@ -611,17 +622,17 @@ void handle_disk_interrupt(int unit, int status) {
             // send request
             int block = diskQ[unit].curRequest->firstBlock + diskQ[unit].curRequest->blocks_so_far;
             char *buf = diskQ[unit].curRequest->buf + diskQ[unit].curRequest->blocks_so_far * 512;
-            USLOSS_Console("Block index within the track: %d\n", block);
-            USLOSS_Console("Buffer pointer: %c\n", buf);
+            // USLOSS_Console("Block index within the track: %d\n", block);
+            // USLOSS_Console("Buffer pointer: %c\n", buf);
             diskQ[unit].req.reg1 = block;
             diskQ[unit].req.reg2 = buf;
             USLOSS_DeviceOutput(USLOSS_DISK_DEV, unit, &diskQ[unit].req);
         } else if (diskQ[unit].req.opr == USLOSS_DISK_READ || diskQ[unit].req.opr == USLOSS_DISK_WRITE) {
             // perform read/write op
-            USLOSS_Console("Perform read/write op\n");
+            // USLOSS_Console("Perform read/write op\n");
             diskQ[unit].curRequest->blocks_so_far++;
-            USLOSS_Console("Blocks so far: %d\n", diskQ[unit].curRequest->blocks_so_far);
-            USLOSS_Console("Sectors: %d\n", diskQ[unit].curRequest->sectors);
+            // USLOSS_Console("Blocks so far: %d\n", diskQ[unit].curRequest->blocks_so_far);
+            // USLOSS_Console("Sectors: %d\n", diskQ[unit].curRequest->sectors);
             if (diskQ[unit].curRequest->blocks_so_far < diskQ[unit].curRequest->sectors) {
                 // schedule next sector
                 if (diskQ[unit].curRequest->op == 0) {
@@ -634,14 +645,14 @@ void handle_disk_interrupt(int unit, int status) {
                 // send request
                 int block = diskQ[unit].curRequest->firstBlock + diskQ[unit].curRequest->blocks_so_far;
                 char *buf = diskQ[unit].curRequest->buf + diskQ[unit].curRequest->blocks_so_far * 512;
-                USLOSS_Console("Block index within the track: %d\n", block);
-                USLOSS_Console("Buffer pointer: %c\n", buf);
+                // USLOSS_Console("Block index within the track: %d\n", block);
+                // USLOSS_Console("Buffer pointer: %c\n", buf);
                 diskQ[unit].req.reg1 = block;
                 diskQ[unit].req.reg2 = buf;
                 USLOSS_DeviceOutput(USLOSS_DISK_DEV, unit, &diskQ[unit].req);
             } else {
                 // request complete, unblock and return result to syscall
-                USLOSS_Console("Request complete, unblock and return result to syscall. The disk's output status is %d\n", status);
+                // USLOSS_Console("Request complete, unblock and return result to syscall. The disk's output status is %d\n", status);
                 MboxSend(diskQ[unit].curRequest->mboxID, &status, sizeof(int));
                 // remove request from queue
                 diskQ[unit].busy = 0;
