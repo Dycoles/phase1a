@@ -73,6 +73,8 @@ typedef struct {
 DiskQueue diskQ[2];
 // keep track of mailboxes for diskSize
 int diskSizeMbox[2];
+// keep track of sems for disk
+int diskQsem[2];
 
 int readMbox[4];
 int writeMbox[4];
@@ -393,10 +395,10 @@ void diskReadSyscall(USLOSS_Sysargs *args) {
     if (!diskQ[unit].busy) {
         startRequest(unit);
     }
-    unlock();
     // block until driver sends status register
     int status;
     MboxRecv(request->mboxID, &status, sizeof(status));
+    unlock();
     // fill in return values
     args->arg4 = (void *)(long) 0;
     args->arg1 = (void *)(long) status;
@@ -404,6 +406,7 @@ void diskReadSyscall(USLOSS_Sysargs *args) {
 
 // To implement in phase 4b
 void diskWriteSyscall(USLOSS_Sysargs *args) {
+    // USLOSS_Console("Write syscall begin\n");
     char *buf = (char *) args->arg1;
     // number of sectors to read
     int sectors = args->arg2;
@@ -438,11 +441,12 @@ void diskWriteSyscall(USLOSS_Sysargs *args) {
     if (!diskQ[unit].busy) {
         startRequest(unit);
     }
-    unlock();
     // block until driver sends status register
     int status;
     int retval = MboxRecv(request->mboxID, &status, sizeof(status));
+    unlock();
     // fill in return values
+    // USLOSS_Console("This is the exit status of write: %d\n", status);
     args->arg4 = (void *)(long) 0;
     args->arg1 = (void *)(long) status;
 }
@@ -532,6 +536,7 @@ int terminalDriver(void *arg) {
 }
 
 void startRequest(int unit) {
+    // (USLOSS_Console("Start request for disk %d\n", unit));
     // check to see if there are items in the queue
     if (diskQ[unit].count == 0) {
         return;
@@ -571,8 +576,10 @@ void startRequest(int unit) {
 }
 
 void handle_disk_interrupt(int unit, int status) {
+    // USLOSS_Console("Handling disk interrupt. Before device input\n");
     int statReg;
     USLOSS_DeviceInput(USLOSS_DISK_DEV, unit, &statReg);
+    // USLOSS_Console("Handling disk interrupt. The disk's status is %d\n", statReg);
     if (diskQ[unit].req.opr == USLOSS_DISK_TRACKS && diskQ[unit].busy == 1) {
         // we are doing a tracks size operation
         MboxSend(diskSizeMbox[unit], &diskQ[unit].tracks, sizeof(diskQ[unit].tracks));
@@ -615,6 +622,7 @@ void handle_disk_interrupt(int unit, int status) {
                 USLOSS_DeviceOutput(USLOSS_DISK_DEV, unit, &diskQ[unit].req);
             } else {
                 // request complete, unblock and return result to syscall
+                // USLOSS_Console("The disk's output status is %d\n", statReg);
                 MboxSend(diskQ[unit].curRequest->mboxID, &statReg, sizeof(int));
                 // remove request from queue
                 diskQ[unit].busy = 0;
@@ -633,9 +641,9 @@ int diskDriver(void *arg) {
     while(1) {
         waitDevice(USLOSS_DISK_DEV, unit, &status);
         // whatToDo(Prev op)
-        lock();
+        kernSemP(diskQsem[unit]);
         handle_disk_interrupt(unit, status);
-        unlock();
+        kernSemV(diskQsem[unit]);
         // whatNext
     }
 }
@@ -683,6 +691,8 @@ void phase4_init() {
         diskSizeMbox[i] = MboxCreate(1, sizeof(int));
         diskQ[i].busy = 0;
         diskQ[i].curTrack = 0;
+        diskQsem[i] = 0;
+        kernSemCreate(1, &diskQsem);
     }
 
     // make user mode lock available to start with
