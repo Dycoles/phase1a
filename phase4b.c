@@ -217,8 +217,8 @@ void termReadSyscall(USLOSS_Sysargs *args) {
     args->arg4 = 0;
 
     kernSemP(busySems[unit]);
-    int old_cr_val = 0;
-    USLOSS_DeviceInput(USLOSS_TERM_DEV, unit, &old_cr_val);
+    //int old_cr_val = 0;
+    //USLOSS_DeviceInput(USLOSS_TERM_DEV, unit, &old_cr_val);
     int cr_val = 0x0; // this turns on the ’send char’ bit (USLOSS spec page 9)
     cr_val |= 0x2; // recv int enable
     cr_val |= 0x4; // xmit int enable
@@ -262,7 +262,7 @@ void termReadSyscall(USLOSS_Sysargs *args) {
     }
     args->arg2 = (void *)(long) i;
     args->arg4 = (void *) 0;
-    USLOSS_DeviceOutput(USLOSS_TERM_DEV, unit, (void*)(long)old_cr_val);
+    //USLOSS_DeviceOutput(USLOSS_TERM_DEV, unit, (void*)(long)old_cr_val);
     kernSemV(busySems[unit]);
     
     //unlock();
@@ -295,8 +295,8 @@ void termWriteSyscall(USLOSS_Sysargs *args) {
     writeLen[unit] = charsInput;
     writeIndex[unit] = 0;
 
-    int old_cr_val;
-    USLOSS_DeviceInput(USLOSS_TERM_DEV, unit, &old_cr_val);
+    //int old_cr_val;
+    //USLOSS_DeviceInput(USLOSS_TERM_DEV, unit, &old_cr_val);
         //unlock();
     //USLOSS_Console("Pre for in write: %d\n", old_cr_val);
     for (int i = 0; i < len; i++) {
@@ -319,7 +319,7 @@ void termWriteSyscall(USLOSS_Sysargs *args) {
     }
     writeIndex[unit] = 0;
     //USLOSS_Console("After for\n");
-    USLOSS_DeviceOutput(USLOSS_TERM_DEV, unit, (void*)(long)old_cr_val);
+    //USLOSS_DeviceOutput(USLOSS_TERM_DEV, unit, (void*)(long)old_cr_val);
     kernSemV(busySems[unit]);
 
     args->arg4 = (void *)0;
