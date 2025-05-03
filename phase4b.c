@@ -598,9 +598,17 @@ void handle_disk_interrupt(int unit, int status) {
 
             // Check to see if it is time to switch tracks:
             if (totalBlocks >= 16) {
-                diskQ[unit].curRequest->track++;            // switch to next track
-                diskQ[unit].curRequest->firstBlock = totalBlocks-16;    // get new first block
-                diskQ[unit].curRequest->blocks_so_far = 0;  // reset blocks so far
+                int newTrack = diskQ[unit].curRequest->track + 1;
+                diskQ[unit].curRequest->track = newTrack;
+                diskQ[unit].curRequest->firstBlock = totalBlocks - 16;
+                diskQ[unit].curRequest->blocks_so_far = 0;
+                // perform seek to switch tracks
+                diskQ[unit].req.opr = USLOSS_DISK_SEEK;
+                diskQ[unit].req.reg1 = (void*)(long)newTrack;
+                diskQ[unit].req.reg2 = NULL;
+                USLOSS_DeviceOutput(USLOSS_DISK_DEV, unit, &diskQ[unit].req);
+                // go back to waitDevice
+                return;
             }
             if (diskQ[unit].curRequest->blocks_so_far < diskQ[unit].curRequest->sectors) {  // schedule next sector
                 if (diskQ[unit].curRequest->op == 0) {  // read op
