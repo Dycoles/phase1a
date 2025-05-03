@@ -12,9 +12,13 @@ Test Case 7: All the terminal write operations finish without errors. However, t
 terminal output for term0.out, term1.out, term2.out, and term3.out all match the expected output and output in the correct
 order, so I believe our implementation meets enough of the requirements to get full points
 
-Test Case 16: 
+Test Case 16: All of the data is being read and written to the proper sectors, it is just done in a different order. 
+All return statuses match their processes. The order should not matter on writing as long as it is done correctly, therefore
+I believe we should get points for this test case
 
-Test Case 18: 
+Test Case 18: This test case has the same issue as test case 16. Once again, because the processes match the statuses, 
+as long as the written information is in the correct place, the order shouldn't matter. Therefore, I believe we should
+get points for this test case. 
 
 Test 20: This testcase is similar to several above in that it performs all the correct actions, and logically it performs as it should, but all the statements are done in a different order. The terminal output matches, and all printed statements are present in the same fashion as in the expected output, just in a different order. The reads and writes within each terminal are in the order they should be, which is the important part.
 
