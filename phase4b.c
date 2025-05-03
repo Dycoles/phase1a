@@ -81,6 +81,8 @@ MinHeap sleepHeap;  // list of sleeping processes
 
 int clockInterrupts = 0;    // keep track of clock interrupts
 
+void startRequest(int);
+
 // Swap elements in the heap.
 void swap(SleepProc* a, SleepProc* b) {
     SleepProc temp = *a;
@@ -230,14 +232,14 @@ void termReadSyscall(USLOSS_Sysargs *args) {
 
     // Validate input:
     if (charsInput <= 0 || (unit < 0 || unit > 3)) {
-        args->arg4 = -1;
+        args->arg4 = (void *) -1;
         kernSemV(busySems[unit]);
         return;
     }
 
     MboxRecv(readReadyMbox[unit], NULL, 0);
-    int i = 0;
-    for (i; i < charsInput; i++) {
+    int i;
+    for (i = 0; i < charsInput; i++) {
         // Read the char:
         if (MboxRecv(readMbox[unit], &readBuffer[i], sizeof(char)) < 0) {
             args->arg4 = (void *) -1;
@@ -280,7 +282,7 @@ void termWriteSyscall(USLOSS_Sysargs *args) {
 
     // Validate input:
     if (charsInput <= 0 || (unit < 0 || unit > 3)) {
-        args->arg4 = -1;
+        args->arg4 = (void *) -1;
         return;
     }
     
@@ -348,15 +350,15 @@ void diskSizeSyscall(USLOSS_Sysargs *args) {
 
 void diskReadSyscall(USLOSS_Sysargs *args) {
     char *buf = (char *) args->arg1;
-    int sectors = args->arg2;   // number of sectors to read
-    int track = args->arg3;     // starting track number
-    int block = args->arg4;     // starting block number
-    int unit = args->arg5;      // which disk to access
+    int sectors = (int)(long) args->arg2;   // number of sectors to read
+    int track = (int)(long) args->arg3;     // starting track number
+    int block = (int)(long) args->arg4;     // starting block number
+    int unit = (int)(long) args->arg5;      // which disk to access
 
     // Validate input:
     if (unit < 0 || unit > 1 || sectors <= 0 || track < 0 || block < 0 || block >= 16) {
         args->arg4 = (void *) -1;
-        args->arg1 = USLOSS_DEV_ERROR;
+        args->arg1 = (void *)(long) USLOSS_DEV_ERROR;
         return;
     }
     
@@ -395,15 +397,15 @@ void diskReadSyscall(USLOSS_Sysargs *args) {
 
 void diskWriteSyscall(USLOSS_Sysargs *args) {
     char *buf = (char *) args->arg1;
-    int sectors = args->arg2;   // number of sectors to read
-    int track = args->arg3;     // starting track number
-    int block = args->arg4;     // starting block number
-    int unit = args->arg5;      // which disk to access
+    int sectors = (int)(long) args->arg2;   // number of sectors to read
+    int track = (int)(long) args->arg3;     // starting track number
+    int block = (int)(long) args->arg4;     // starting block number
+    int unit = (int)(long) args->arg5;      // which disk to access
 
     // Validate input:
     if (unit < 0 || unit > 1 || sectors <= 0 || track < 0 || block < 0 || block >= 16) {
         args->arg4 = (void *) -1;
-        args->arg1 = USLOSS_DEV_ERROR;
+        args->arg1 = (void *)(long) USLOSS_DEV_ERROR;
         return;
     }
     
@@ -462,9 +464,6 @@ int clockDriver(void *arg) {
 
 void handle_one_terminal_interrupt(int unit, int status) {
     if (USLOSS_TERM_STAT_RECV(status) == USLOSS_DEV_BUSY) { // if recv is ready
-        // Read character from status:
-        TermBuf thisBuf = termBufs[unit];
-
         // Place character in buffer and wake up waiting process:
         char c = USLOSS_TERM_STAT_CHAR(status);
         if (termBufs[unit].bufIs[termBufs[unit].whichBuf] >= MAXLINE || c == '\n') {
@@ -588,7 +587,7 @@ void handle_disk_interrupt(int unit, int status) {
             int block = diskQ[unit].curRequest->firstBlock + diskQ[unit].curRequest->blocks_so_far;
             char *buf = diskQ[unit].curRequest->buf + diskQ[unit].curRequest->blocks_so_far * 512;
             
-            diskQ[unit].req.reg1 = block;
+            diskQ[unit].req.reg1 = (void *)(long) block;
             diskQ[unit].req.reg2 = buf;
             USLOSS_DeviceOutput(USLOSS_DISK_DEV, unit, &diskQ[unit].req);
         } else if (diskQ[unit].req.opr == USLOSS_DISK_READ || diskQ[unit].req.opr == USLOSS_DISK_WRITE) {   // perform read/write op
@@ -602,12 +601,14 @@ void handle_disk_interrupt(int unit, int status) {
                 diskQ[unit].curRequest->track = newTrack;
                 diskQ[unit].curRequest->firstBlock = totalBlocks - 16;
                 diskQ[unit].curRequest->blocks_so_far = 0;
-                // perform seek to switch tracks
+
+                // Perform seek to switch tracks:
                 diskQ[unit].req.opr = USLOSS_DISK_SEEK;
                 diskQ[unit].req.reg1 = (void*)(long)newTrack;
                 diskQ[unit].req.reg2 = NULL;
                 USLOSS_DeviceOutput(USLOSS_DISK_DEV, unit, &diskQ[unit].req);
-                // go back to waitDevice
+
+                // Go back to waitDevice:
                 return;
             }
             if (diskQ[unit].curRequest->blocks_so_far < diskQ[unit].curRequest->sectors) {  // schedule next sector
@@ -621,7 +622,7 @@ void handle_disk_interrupt(int unit, int status) {
                 int block = diskQ[unit].curRequest->firstBlock + diskQ[unit].curRequest->blocks_so_far;
                 char *buf = diskQ[unit].curRequest->buf + diskQ[unit].curRequest->blocks_so_far * 512;
                 
-                diskQ[unit].req.reg1 = block;
+                diskQ[unit].req.reg1 = (void *)(long) block;
                 diskQ[unit].req.reg2 = buf;
                 USLOSS_DeviceOutput(USLOSS_DISK_DEV, unit, &diskQ[unit].req);
             } else {    // request complete, unblock and return result to syscall
@@ -699,7 +700,7 @@ void phase4_init() {
         diskQ[i].count = 0;
         diskQ[i].head = 0;
         diskQsem[i] = 0;
-        kernSemCreate(1, &diskQsem);
+        kernSemCreate(1, &diskQsem[i]);
     }
 
     // Make user mode lock available to start with:
@@ -721,7 +722,7 @@ void phase4_start_service_processes() {
     for (int i = 0; i < 4; i++) {
         char name[16];
         sprintf(name, "TerminalDriver%d", i);
-        int terminalResult = spork(name, terminalDriver, i, USLOSS_MIN_STACK, 2);
+        int terminalResult = spork(name, terminalDriver, (void *)(long) i, USLOSS_MIN_STACK, 2);
         if (terminalResult < 0) {
             USLOSS_Console("Failed to start terminal driver\n");
             USLOSS_Halt(1);
@@ -732,7 +733,7 @@ void phase4_start_service_processes() {
     for (int i = 0; i < 2; i++) {
         char name[16];
         sprintf(name, "DiskDriver%d", i);
-        int diskResult = spork("DiskDriver", diskDriver, i, USLOSS_MIN_STACK, 2);
+        int diskResult = spork("DiskDriver", diskDriver, (void *)(long) i, USLOSS_MIN_STACK, 2);
         if (diskResult < 0) {
             USLOSS_Console("Failed to start disk driver%d\n", i);
             USLOSS_Halt(1);
