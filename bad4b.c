@@ -381,7 +381,6 @@ void diskReadSyscall(USLOSS_Sysargs *args) {
     }
     // USLOSS_Console("Read syscall successful, begin operation\n");
     // successful input, perform operation
-    lock();
     int index = (diskQ[unit].head + diskQ[unit].count) % MAXPROC;
     DiskRequest *request = &diskQ[unit].queue[index];
     // fill out parameters of current request
@@ -401,7 +400,6 @@ void diskReadSyscall(USLOSS_Sysargs *args) {
     // block until driver sends status register
     int status;
     // USLOSS_Console("Receiving status from mailbox...\n");
-    unlock();
     int retval = MboxRecv(request->mboxID, &status, sizeof(status));
     // USLOSS_Console("Receiving status from mailbox: Status is %d\n", status);
     // fill in return values
@@ -551,12 +549,12 @@ int terminalDriver(void *arg) {
 }
 
 void startRequest(int unit) {
-    lock();
     // (USLOSS_Console("Start request for disk %d\n", unit));
     // check to see if there are items in the queue
     if (diskQ[unit].count == 0) {
         return;
     }
+    lock();
     // C-SCAN Algorithm to find request
     int index = -1;
     int curTrack = diskQ[unit].curTrack;
@@ -584,8 +582,8 @@ void startRequest(int unit) {
             // USLOSS_Console("Index is %d\n", index);
         }
     }
-    // USLOSS_Console("Final Index is %d\n", index);
-    // diskQ[unit].head = index;
+    // USLOSS_Console("Final Index for diskQ[%d].head is %d\n", unit, index);
+    diskQ[unit].head = index;
     // cur request should be the index we find in c-scan
     diskQ[unit].curRequest = &diskQ[unit].queue[index];
     // USLOSS_Console("Seek Destination Track is: %d\n", diskQ[unit].curRequest->track);
@@ -602,6 +600,7 @@ void handle_disk_interrupt(int unit, int status) {
     // USLOSS_Console("Handling disk interrupt. The disk's status is %d\n", status);
     if (status == USLOSS_DEV_ERROR) {
         MboxSend(diskQ[unit].curRequest->mboxID, &status, sizeof(int));
+        // remove item from queue
         diskQ[unit].busy = 0;
         diskQ[unit].head = (diskQ[unit].head + 1) % MAXPROC;
         diskQ[unit].count--;
@@ -644,11 +643,17 @@ void handle_disk_interrupt(int unit, int status) {
             // check to see if it is time to switch tracks
             if (totalBlocks >= 16) {
                 // switch to next track
-                diskQ[unit].curRequest->track++;
-                // get new first block
-                diskQ[unit].curRequest->firstBlock = totalBlocks-16;
-                // reset blocks so far
+                int newTrack = diskQ[unit].curRequest->track + 1;
+                diskQ[unit].curRequest->track = newTrack;
+                diskQ[unit].curRequest->firstBlock = totalBlocks - 16;
                 diskQ[unit].curRequest->blocks_so_far = 0;
+                // perform seek to switch tracks
+                diskQ[unit].req.opr = USLOSS_DISK_SEEK;
+                diskQ[unit].req.reg1 = (void*)(long)newTrack;
+                diskQ[unit].req.reg2 = NULL;
+                USLOSS_DeviceOutput(USLOSS_DISK_DEV, unit, &diskQ[unit].req);
+                // go back to waitDevice
+                return;
             }
             if (diskQ[unit].curRequest->blocks_so_far < diskQ[unit].curRequest->sectors) {
                 // schedule next sector
